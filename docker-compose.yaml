@@ -1,0 +1,58 @@
+services:
+  redis:
+    image: redis:8-alpine
+    container_name: market-monitor-redis
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  backend:
+    image: python:3.13-slim
+    container_name: market-monitor-backend
+    working_dir: /app
+    command: >
+      sh -c "pip install --no-cache-dir -r requirements.txt
+      && uvicorn app.main:app --host 0.0.0.0 --port 8000"
+    environment:
+      MARKET_MONITOR_DATA: /app/data
+      MARKET_MONITOR_REDIS_URL: redis://redis:6379/0
+      MARKET_MONITOR_QUOTE_CACHE_TTL_SECONDS: 15
+      MARKET_MONITOR_GOLD_CACHE_TTL_SECONDS: 15
+      MARKET_MONITOR_SECTOR_CACHE_TTL_SECONDS: 60
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend:/app
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  frontend:
+    image: node:24-alpine
+    container_name: market-monitor-frontend
+    working_dir: /app
+    command: >
+      sh -c "npm ci
+      && npm run dev -- --host 0.0.0.0"
+    environment:
+      VITE_API_PROXY_TARGET: http://backend:8000
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./frontend:/app
+      - frontend-node-modules:/app/node_modules
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  redis-data:
+  frontend-node-modules:
