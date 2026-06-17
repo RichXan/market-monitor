@@ -1,3 +1,5 @@
+import json
+
 from app.models import Market, WatchItemCreate
 from app.store import WatchlistStore
 
@@ -15,6 +17,8 @@ def test_store_seeds_default_watchlist_when_file_is_missing(tmp_path):
         "AAPL",
         "MSFT",
         "NVDA",
+        "BTC-USD",
+        "ETH-USD",
     ]
     assert [item.market for item in items] == [
         Market.A,
@@ -24,6 +28,8 @@ def test_store_seeds_default_watchlist_when_file_is_missing(tmp_path):
         Market.US,
         Market.US,
         Market.US,
+        Market.CRYPTO,
+        Market.CRYPTO,
     ]
 
 
@@ -39,6 +45,31 @@ def test_store_adds_and_persists_watch_item(tmp_path):
     assert created.symbol == "TSLA"
     assert created.name == "Tesla"
     assert any(item.symbol == "TSLA" for item in reloaded.list_items())
+
+
+def test_store_adds_crypto_defaults_to_existing_watchlist(tmp_path):
+    path = tmp_path / "watchlist.json"
+    path.write_text(
+        json.dumps(
+            [
+                {
+                    "id": "us:AAPL",
+                    "market": "us",
+                    "symbol": "AAPL",
+                    "name": "Apple",
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+    store = WatchlistStore(path)
+
+    items = store.list_items()
+    reloaded = WatchlistStore(path).list_items()
+
+    assert [item.symbol for item in items] == ["AAPL", "BTC-USD", "ETH-USD"]
+    assert [item.market for item in items] == [Market.US, Market.CRYPTO, Market.CRYPTO]
+    assert [item.symbol for item in reloaded] == ["AAPL", "BTC-USD", "ETH-USD"]
 
 
 def test_store_prevents_duplicate_market_symbol_pairs(tmp_path):

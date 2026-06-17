@@ -30,6 +30,9 @@ class FakeTicker:
         if symbol == "XLV":
             last_price = 101.0
             previous_close = 100.0
+        if symbol == "BTC-USD":
+            last_price = 65000.0
+            previous_close = 64000.0
         if symbol.startswith("XL") and symbol not in {"XLK", "XLF", "XLV"}:
             last_price = 100.0
             previous_close = 100.0
@@ -323,11 +326,12 @@ def test_provider_normalizes_quotes_from_akshare_and_yfinance():
         WatchItem(id="a:600519", market=Market.A, symbol="600519", name=None),
         WatchItem(id="hk:00700", market=Market.HK, symbol="00700", name=None),
         WatchItem(id="us:AAPL", market=Market.US, symbol="AAPL", name="Apple"),
+        WatchItem(id="crypto:BTC-USD", market=Market.CRYPTO, symbol="BTC-USD", name="Bitcoin"),
     ]
 
     quotes = provider.get_quotes(items)
 
-    assert [quote.symbol for quote in quotes] == ["600519", "00700", "AAPL"]
+    assert [quote.symbol for quote in quotes] == ["600519", "00700", "AAPL", "BTC-USD"]
     assert quotes[0].name == "贵州茅台"
     assert quotes[0].price == 1500.5
     assert quotes[0].currency == "CNY"
@@ -336,7 +340,13 @@ def test_provider_normalizes_quotes_from_akshare_and_yfinance():
     assert quotes[2].price == 192.4
     assert quotes[2].change == 2.4
     assert quotes[2].change_percent == 1.26
+    assert quotes[2].volume == 55000000
+    assert quotes[2].amount == 10582000000
     assert quotes[2].currency == "USD"
+    assert quotes[3].market == Market.CRYPTO
+    assert quotes[3].price == 65000.0
+    assert quotes[3].change_percent == 1.56
+    assert quotes[3].amount == 3575000000000
 
 
 def test_provider_normalizes_gold_quote():
@@ -358,6 +368,7 @@ def test_provider_searches_a_hk_and_us_symbols_by_name():
     a_name_results = provider.search_symbols(Market.A, "五粮液")
     hk_results = provider.search_symbols(Market.HK, "腾讯")
     us_results = provider.search_symbols(Market.US, "Apple")
+    crypto_results = provider.search_symbols(Market.CRYPTO, "bitcoin")
 
     assert [(item.market, item.symbol, item.name) for item in a_results] == [
         (Market.A, "600519", "贵州茅台")
@@ -370,6 +381,9 @@ def test_provider_searches_a_hk_and_us_symbols_by_name():
     ]
     assert [(item.market, item.symbol, item.name) for item in us_results] == [
         (Market.US, "AAPL", "Apple Inc.")
+    ]
+    assert [(item.market, item.symbol, item.name) for item in crypto_results] == [
+        (Market.CRYPTO, "BTC-USD", "Bitcoin")
     ]
 
 

@@ -174,6 +174,12 @@ def market_statuses(now_utc: datetime | None = None) -> list[MarketStatus]:
             "04:00-09:30 盘前 / 09:30-16:00 正常 / 16:00-20:00 盘后",
             [(time(9, 30), time(16, 0))],
         ),
+        (
+            Market.CRYPTO,
+            "UTC",
+            "24/7",
+            [(time(0, 0), time(23, 59, 59))],
+        ),
     ]
     labels = {
         "trading": "交易中",
@@ -185,7 +191,10 @@ def market_statuses(now_utc: datetime | None = None) -> list[MarketStatus]:
     statuses: list[MarketStatus] = []
     for market, timezone, session, sessions in configs:
         local_now = now_utc.astimezone(ZoneInfo(timezone))
-        if market == Market.US and local_now.weekday() < 5:
+        if market == Market.CRYPTO:
+            state = "trading"
+            label = "24/7"
+        elif market == Market.US and local_now.weekday() < 5:
             current = local_now.time()
             if time(4, 0) <= current < time(9, 30):
                 state = "pre_market"
@@ -193,13 +202,15 @@ def market_statuses(now_utc: datetime | None = None) -> list[MarketStatus]:
                 state = "after_hours"
             else:
                 state = session_state(local_now, sessions)
+            label = labels[state]
         else:
             state = session_state(local_now, sessions)
+            label = labels[state]
         statuses.append(
             MarketStatus(
                 market=market,
                 state=state,
-                label=labels[state],
+                label=label,
                 timezone=timezone,
                 session=session,
                 updated_at=now_utc.isoformat(),

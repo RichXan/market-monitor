@@ -40,7 +40,8 @@ vi.mock("./api", () => ({
 
 const watchlist: WatchItem[] = [
   { id: "us:AAPL", market: "us", symbol: "AAPL", name: "Apple" },
-  { id: "a:600519", market: "a", symbol: "600519", name: "贵州茅台" }
+  { id: "a:600519", market: "a", symbol: "600519", name: "贵州茅台" },
+  { id: "crypto:BTC-USD", market: "crypto", symbol: "BTC-USD", name: "Bitcoin" }
 ];
 
 const quotes: Quote[] = [
@@ -56,6 +57,8 @@ const quotes: Quote[] = [
     high: 195,
     low: 188,
     previous_close: 190,
+    volume: 7654321,
+    amount: 123456789,
     currency: "USD",
     status: { status: "ok", source: "yfinance", updated_at: "2026-06-17T00:00:00+00:00" }
   },
@@ -71,8 +74,27 @@ const quotes: Quote[] = [
     high: 1508,
     low: 1480,
     previous_close: 1488.5,
+    volume: 1200000,
+    amount: 1800000000,
     currency: "CNY",
     status: { status: "ok", source: "AKShare", updated_at: "2026-06-17T00:00:00+00:00" }
+  },
+  {
+    id: "crypto:BTC-USD",
+    market: "crypto",
+    symbol: "BTC-USD",
+    name: "Bitcoin",
+    price: 65000,
+    change: 1000,
+    change_percent: 1.56,
+    open: 64200,
+    high: 66000,
+    low: 63000,
+    previous_close: 64000,
+    volume: 32000,
+    amount: 2080000000,
+    currency: "USD",
+    status: { status: "ok", source: "yfinance / Yahoo Finance crypto", updated_at: "2026-06-17T00:00:00+00:00" }
   }
 ];
 
@@ -119,7 +141,8 @@ const symbolResults: SymbolSearchResult[] = [
 const marketStatuses: MarketStatus[] = [
   { market: "a", state: "trading", label: "交易中", timezone: "Asia/Shanghai", session: "09:30-11:30 / 13:00-15:00", updated_at: "2026-06-17T00:00:00+00:00" },
   { market: "hk", state: "closed", label: "休市", timezone: "Asia/Hong_Kong", session: "09:30-12:00 / 13:00-16:00", updated_at: "2026-06-17T00:00:00+00:00" },
-  { market: "us", state: "pre_market", label: "盘前", timezone: "America/New_York", session: "09:30-16:00", updated_at: "2026-06-17T00:00:00+00:00" }
+  { market: "us", state: "pre_market", label: "盘前", timezone: "America/New_York", session: "09:30-16:00", updated_at: "2026-06-17T00:00:00+00:00" },
+  { market: "crypto", state: "trading", label: "24/7", timezone: "UTC", session: "24/7", updated_at: "2026-06-17T00:00:00+00:00" }
 ];
 
 const health: HealthResponse = {
@@ -127,6 +150,13 @@ const health: HealthResponse = {
   services: [
     { name: "FastAPI", status: "ok", source: "local api", updated_at: "2026-06-17T00:00:00+00:00" },
     { name: "Cache", status: "ok", source: "InMemoryJsonCache", updated_at: "2026-06-17T00:00:00+00:00" },
+    {
+      name: "Background refresh",
+      status: "partial",
+      source: "60s interval",
+      updated_at: "2026-06-17T00:00:00+00:00",
+      message: "部分板块成分刷新超时"
+    },
     { name: "Quotes", status: "ok", source: "AKShare", updated_at: "2026-06-17T00:00:00+00:00" },
     { name: "Gold", status: "ok", source: "AKShare", updated_at: "2026-06-17T00:00:00+00:00" },
     { name: "Sectors", status: "unavailable", source: "fake-sector", updated_at: "2026-06-17T00:00:00+00:00" }
@@ -178,16 +208,30 @@ describe("App", () => {
 
     expect(await screen.findByText("Apple")).toBeInTheDocument();
     expect(screen.getByText("$192.40")).toBeInTheDocument();
+    expect(screen.getByText("Bitcoin")).toBeInTheDocument();
+    expect(screen.getByText("$65,000.00")).toBeInTheDocument();
+    expect(screen.getAllByText("加密货币").length).toBeGreaterThan(0);
     expect(screen.getByText("上海金 Au99.99")).toBeInTheDocument();
-    expect(screen.getAllByText("自选 1")).toHaveLength(2);
-    expect(screen.getAllByText("已报价 1/1")).toHaveLength(2);
+    expect(screen.getAllByText("自选 1")).toHaveLength(3);
+    expect(screen.getAllByText("已报价 1/1")).toHaveLength(3);
     expect(screen.getByText("暂无板块排行")).toBeInTheDocument();
     expect(screen.getByText("Technology")).toBeInTheDocument();
     expect(screen.getByText("交易中")).toBeInTheDocument();
     expect(screen.getByText("接口健康")).toBeInTheDocument();
     expect(screen.getByText("Cache")).toBeInTheDocument();
+    expect(screen.getByText("部分板块成分刷新超时")).toBeInTheDocument();
     expect(screen.getAllByText("更新").length).toBeGreaterThan(0);
     expect(screen.getByLabelText("日内区间 AAPL")).toBeInTheDocument();
+  });
+
+  it("renders today's turnover and volume for each watchlist quote", async () => {
+    render(<App />);
+
+    expect(await screen.findByText("Apple")).toBeInTheDocument();
+    expect(screen.getAllByText("今日成交额").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("今日成交量").length).toBeGreaterThan(0);
+    expect(screen.getByText("1.23亿")).toBeInTheDocument();
+    expect(screen.getByText("765.43万")).toBeInTheDocument();
   });
 
   it("loads sector constituents when a sector row is selected", async () => {

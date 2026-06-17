@@ -143,7 +143,7 @@ h2 {
 
 .market-strip {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 10px;
   margin-bottom: 12px;
 }
@@ -214,6 +214,14 @@ h2 {
   grid-column: 2 / 4;
   color: #62615d;
   font-size: 0.72rem;
+}
+
+.health-row p {
+  grid-column: 1 / 4;
+  color: #7e5b16;
+  font-size: 0.72rem;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
 }
 
 .mini-status {
@@ -338,10 +346,10 @@ h2 {
 
 .quote-row {
   display: grid;
-  grid-template-columns: 64px minmax(140px, 1fr) minmax(92px, 0.72fr) 76px minmax(128px, 0.95fr) 74px minmax(132px, 0.9fr) 36px;
+  grid-template-columns: 64px minmax(140px, 1fr) minmax(92px, 0.72fr) 76px minmax(128px, 0.95fr) minmax(148px, 0.9fr) minmax(132px, 0.9fr) 36px;
   align-items: center;
   gap: 8px;
-  min-height: 48px;
+  min-height: 58px;
   padding: 8px 9px;
   border: 1px solid #d3d0c6;
   border-radius: 6px;
@@ -424,6 +432,29 @@ h2 {
 
 .range-empty {
   color: #62615d;
+}
+
+.quote-activity-cell {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px;
+  min-width: 0;
+}
+
+.quote-activity-cell > span {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.quote-activity-cell small {
+  color: #62615d;
+  font-size: 0.68rem;
+  white-space: nowrap;
+}
+
+.quote-activity-cell strong {
+  font-size: 0.86rem;
 }
 
 .positive {
@@ -555,14 +586,12 @@ h2 {
   }
 
   .quote-row {
-    grid-template-columns: 52px minmax(130px, 1fr) 84px 72px 36px;
+    grid-template-columns: 52px minmax(130px, 1fr) 84px 72px minmax(126px, 0.85fr) 36px;
   }
 
   .quote-row > span:nth-child(5),
-  .quote-row > span:nth-child(6),
   .quote-row > span:nth-child(7),
   .quote-head > span:nth-child(5),
-  .quote-head > span:nth-child(6),
   .quote-head > span:nth-child(7) {
     display: none;
   }
@@ -588,13 +617,20 @@ h2 {
   }
 
   .quote-row {
-    grid-template-columns: 1fr 1fr 36px;
+    grid-template-columns: minmax(0, 1fr) 86px 72px 36px;
   }
 
   .quote-row > span:first-child,
   .quote-row > span:nth-child(5),
-  .quote-row > span:nth-child(6),
+  .quote-row > span:nth-child(7),
   .quote-head {
     display: none;
+  }
+
+  .quote-activity-cell {
+    grid-column: 1 / -1;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    padding-top: 4px;
+    border-top: 1px dashed #d3d0c6;
   }
 }

@@ -57,6 +57,16 @@ HK_SECTOR_LABELS: dict[str, str] = {
     "Utilities": "公用事业",
 }
 
+CRYPTO_SYMBOLS: list[tuple[str, str]] = [
+    ("BTC-USD", "Bitcoin"),
+    ("ETH-USD", "Ethereum"),
+    ("SOL-USD", "Solana"),
+    ("BNB-USD", "BNB"),
+    ("XRP-USD", "XRP"),
+    ("DOGE-USD", "Dogecoin"),
+    ("ADA-USD", "Cardano"),
+]
+
 
 def _status(
     status: str,
@@ -137,6 +147,8 @@ class MarketDataProvider:
         for item in items:
             if item.market == Market.US:
                 quotes.append(self._quote_from_yfinance(item))
+            elif item.market == Market.CRYPTO:
+                quotes.append(self._quote_from_yfinance(item, source="yfinance / Yahoo Finance crypto"))
             elif item.market == Market.A:
                 quotes.append(self._quote_from_frame(item, frames[Market.A], "CNY"))
             elif item.market == Market.HK:
@@ -149,6 +161,8 @@ class MarketDataProvider:
             return []
         if market == Market.US:
             return self._search_us_symbols(normalized_query, limit)
+        if market == Market.CRYPTO:
+            return self._search_crypto_symbols(normalized_query, limit)
         if market == Market.A:
             results = self._search_a_code_name_symbols(normalized_query, limit)
             if results:
@@ -827,6 +841,61 @@ class MarketDataProvider:
                 break
         return results
 
+    def _search_crypto_symbols(self, query: str, limit: int) -> list[SymbolSearchResult]:
+        query_upper = query.upper()
+        results = [
+            SymbolSearchResult(
+                market=Market.CRYPTO,
+                symbol=symbol,
+                name=name,
+                source="local crypto symbols",
+            )
+            for symbol, name in CRYPTO_SYMBOLS
+            if query_upper in symbol.upper() or query_upper in name.upper()
+        ]
+        if len(results) >= limit:
+            return results[:limit]
+
+        try:
+            search = self.yf.Search(
+                query,
+                max_results=limit,
+                news_count=0,
+                lists_count=0,
+                include_cb=False,
+                include_nav_links=False,
+                include_research=False,
+                include_cultural_assets=False,
+                recommended=0,
+            )
+        except Exception:
+            return results[:limit]
+
+        seen = {(item.market, item.symbol) for item in results}
+        for quote in getattr(search, "quotes", []) or []:
+            symbol = str(quote.get("symbol") or "").upper()
+            if not symbol or symbol.endswith((".SS", ".SZ", ".HK")):
+                continue
+            quote_type = str(quote.get("quoteType") or "").upper()
+            if quote_type and quote_type not in {"CRYPTOCURRENCY", "CRYPTO"}:
+                continue
+            key = (Market.CRYPTO, symbol)
+            if key in seen:
+                continue
+            seen.add(key)
+            name = str(quote.get("shortname") or quote.get("longname") or symbol)
+            results.append(
+                SymbolSearchResult(
+                    market=Market.CRYPTO,
+                    symbol=symbol,
+                    name=name,
+                    source="yfinance / Yahoo Finance crypto search",
+                )
+            )
+            if len(results) >= limit:
+                break
+        return results[:limit]
+
     def _quote_from_yfinance(
         self,
         item: WatchItem,
@@ -838,6 +907,10 @@ class MarketDataProvider:
             info = ticker.fast_info
             price = _float(info.get("lastPrice"))
             previous_close = _float(info.get("previousClose"))
+            volume = _float(info.get("lastVolume") or info.get("volume"))
+            amount = _float(info.get("amount"))
+            if amount is None and price is not None and volume is not None:
+                amount = round(price * volume, 2)
             change = None
             change_percent = None
             if price is not None and previous_close not in (None, 0):
@@ -855,7 +928,8 @@ class MarketDataProvider:
                 high=_float(info.get("dayHigh")),
                 low=_float(info.get("dayLow")),
                 previous_close=previous_close,
-                volume=_float(info.get("lastVolume") or info.get("volume")),
+                volume=volume,
+                amount=amount,
                 currency=str(info.get("currency") or "USD"),
                 status=_status("ok", source),
             )

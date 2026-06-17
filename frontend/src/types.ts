@@ -1,4 +1,4 @@
-export type Market = "a" | "hk" | "us";
+export type Market = "a" | "hk" | "us" | "crypto";
 export type StatusKind = "ok" | "partial" | "unavailable" | "error";
 export type MarketState = "trading" | "break" | "pre_market" | "after_hours" | "closed";
 

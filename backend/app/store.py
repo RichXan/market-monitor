@@ -12,6 +12,13 @@ DEFAULT_WATCHLIST: list[WatchItemCreate] = [
     WatchItemCreate(market=Market.US, symbol="AAPL", name="Apple"),
     WatchItemCreate(market=Market.US, symbol="MSFT", name="Microsoft"),
     WatchItemCreate(market=Market.US, symbol="NVDA", name="NVIDIA"),
+    WatchItemCreate(market=Market.CRYPTO, symbol="BTC-USD", name="Bitcoin"),
+    WatchItemCreate(market=Market.CRYPTO, symbol="ETH-USD", name="Ethereum"),
+]
+
+REQUIRED_DEFAULT_WATCHLIST: list[WatchItemCreate] = [
+    WatchItemCreate(market=Market.CRYPTO, symbol="BTC-USD", name="Bitcoin"),
+    WatchItemCreate(market=Market.CRYPTO, symbol="ETH-USD", name="Ethereum"),
 ]
 
 
@@ -34,7 +41,7 @@ class WatchlistStore:
             self._write([self._from_create(item) for item in DEFAULT_WATCHLIST])
 
     def list_items(self) -> list[WatchItem]:
-        return self._read()
+        return self._read_with_required_defaults()
 
     def add_item(self, payload: WatchItemCreate) -> WatchItem:
         normalized = WatchItemCreate(
@@ -74,6 +81,19 @@ class WatchlistStore:
     def _read(self) -> list[WatchItem]:
         raw = json.loads(self.path.read_text(encoding="utf-8"))
         return [WatchItem.model_validate(item) for item in raw]
+
+    def _read_with_required_defaults(self) -> list[WatchItem]:
+        items = self._read()
+        existing = {item.id for item in items}
+        additions = [
+            self._from_create(payload)
+            for payload in REQUIRED_DEFAULT_WATCHLIST
+            if make_watch_id(payload.market, payload.symbol) not in existing
+        ]
+        if additions:
+            items = [*items, *additions]
+            self._write(items)
+        return items
 
     def _write(self, items: list[WatchItem]) -> None:
         self.path.write_text(

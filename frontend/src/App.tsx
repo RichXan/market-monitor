@@ -29,18 +29,21 @@ import type {
 } from "./types";
 import "./styles.css";
 
-const markets: Market[] = ["a", "hk", "us"];
+const quoteMarkets: Market[] = ["a", "hk", "us", "crypto"];
+const sectorMarkets: Market[] = ["a", "hk", "us"];
 
 const marketLabels: Record<Market, string> = {
   a: "A股",
   hk: "港股",
-  us: "美股"
+  us: "美股",
+  crypto: "加密货币"
 };
 
 const marketHint: Record<Market, string> = {
   a: "AKShare / 东方财富；必要时 Yahoo 兜底",
   hk: "AKShare / 东方财富延迟；必要时 Yahoo 兜底",
-  us: "Yahoo Finance / yfinance"
+  us: "Yahoo Finance / yfinance",
+  crypto: "Yahoo Finance / yfinance crypto"
 };
 
 const initialGold: GoldQuote = {
@@ -56,7 +59,7 @@ const initialGold: GoldQuote = {
   }
 };
 
-const initialSectors: SectorResponse[] = markets.map((market) => ({
+const initialSectors: SectorResponse[] = sectorMarkets.map((market) => ({
   market,
   items: [],
   status: {
@@ -211,11 +214,11 @@ export default function App() {
 
   async function loadSectors() {
     setSectors((current) =>
-      markets.map((market) => current.find((sector) => sector.market === market) ?? initialSectors.find((sector) => sector.market === market)!)
+      sectorMarkets.map((market) => current.find((sector) => sector.market === market) ?? initialSectors.find((sector) => sector.market === market)!)
     );
 
     const results = await Promise.all(
-      markets.map(async (market) => {
+      sectorMarkets.map(async (market) => {
         try {
           return await fetchSectors(market);
         } catch (exc) {
@@ -381,7 +384,7 @@ export default function App() {
           <small>{gold.name}</small>
           <small>{gold.status.source}</small>
         </div>
-        {markets.map((market) => {
+        {quoteMarkets.map((market) => {
           const marketItems = watchlist.filter((item) => item.market === market);
           const quoted = marketItems.filter((item) => {
             const quote = quotesById.get(item.id);
@@ -413,6 +416,7 @@ export default function App() {
               <option value="a">A股</option>
               <option value="hk">港股</option>
               <option value="us">美股</option>
+              <option value="crypto">加密货币</option>
             </select>
           </label>
           <label>
@@ -423,7 +427,7 @@ export default function App() {
                 setSelectedLookupKey("");
                 setForm((current) => ({ ...current, symbol: event.target.value }));
               }}
-              placeholder="AAPL / 00700 / 600519"
+              placeholder="AAPL / BTC-USD / 00700"
             />
           </label>
           <div className="lookup-field">
@@ -517,6 +521,7 @@ function HealthServiceRow({ service }: { service: HealthService }) {
       <small>
         <span>更新</span> {formatTime(service.updated_at)}
       </small>
+      {service.message ? <p>{service.message}</p> : null}
     </div>
   );
 }
@@ -545,7 +550,7 @@ function WatchlistPanel({
           <span>最新</span>
           <span>涨跌幅</span>
           <span>日内</span>
-          <span>成交量</span>
+          <span>今日成交</span>
           <span>更新</span>
           <span></span>
         </div>
@@ -567,7 +572,16 @@ function WatchlistPanel({
                 <span>
                   <PriceRange quote={quote} symbol={item.symbol} />
                 </span>
-                <span>{formatCompact(quote?.volume)}</span>
+                <span className="quote-activity-cell" aria-label={`${item.symbol} 今日成交`}>
+                  <span>
+                    <small>今日成交额</small>
+                    <strong>{formatCompact(quote?.amount)}</strong>
+                  </span>
+                  <span>
+                    <small>今日成交量</small>
+                    <strong>{formatCompact(quote?.volume)}</strong>
+                  </span>
+                </span>
                 <span className="source-cell">
                   <span>更新</span> {formatTime(quote?.status.updated_at)}
                   <small>{quote?.status.source ?? marketHint[item.market]}</small>

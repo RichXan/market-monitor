@@ -9,6 +9,7 @@ class Market(StrEnum):
     A = "a"
     HK = "hk"
     US = "us"
+    CRYPTO = "crypto"
 
 
 class WatchItemCreate(BaseModel):

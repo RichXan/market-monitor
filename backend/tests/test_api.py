@@ -194,9 +194,12 @@ def test_market_status_endpoint(tmp_path):
     response = client.get("/api/market-status")
 
     assert response.status_code == 200
-    assert {item["market"] for item in response.json()} == {"a", "hk", "us"}
+    assert {item["market"] for item in response.json()} == {"a", "hk", "us", "crypto"}
     assert all(item["label"] for item in response.json())
     assert all(item["timezone"] for item in response.json())
+    crypto = next(item for item in response.json() if item["market"] == "crypto")
+    assert crypto["label"] == "24/7"
+    assert crypto["session"] == "24/7"
 
 
 def test_watchlist_crud_endpoints(tmp_path):

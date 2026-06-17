@@ -7,6 +7,7 @@ Local market dashboard for A-share, Hong Kong, US equity, and Shanghai Gold Exch
 - A-share quotes and A-share sector boards: AKShare / Eastmoney, with yfinance/Yahoo single-symbol fallback when AKShare quote feeds are slow or unavailable
 - Hong Kong quotes: AKShare / Eastmoney delayed quote feed, with yfinance/Yahoo single-symbol fallback when AKShare quote feeds are slow or unavailable
 - US quotes: yfinance / Yahoo Finance
+- Crypto quotes: yfinance / Yahoo Finance crypto symbols such as `BTC-USD` and `ETH-USD`
 - Gold: AKShare / Shanghai Gold Exchange `Au99.99`
 - Hong Kong sector activity is aggregated from Yahoo Finance active-stock screeners. US sector activity uses liquid sector ETF proxies from Yahoo Finance.
 
