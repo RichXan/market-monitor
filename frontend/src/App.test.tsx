@@ -6,18 +6,33 @@ import {
   addWatchItem,
   deleteWatchItem,
   fetchGold,
+  fetchHealth,
+  fetchMarketStatuses,
   fetchQuotes,
+  fetchSectorDetails,
   fetchSectors,
   fetchSymbolSearch,
   fetchWatchlist
 } from "./api";
-import type { GoldQuote, Quote, SectorResponse, SymbolSearchResult, WatchItem } from "./types";
+import type {
+  GoldQuote,
+  HealthResponse,
+  MarketStatus,
+  Quote,
+  SectorDetailResponse,
+  SectorResponse,
+  SymbolSearchResult,
+  WatchItem
+} from "./types";
 
 vi.mock("./api", () => ({
   fetchWatchlist: vi.fn(),
   fetchQuotes: vi.fn(),
   fetchGold: vi.fn(),
   fetchSectors: vi.fn(),
+  fetchSectorDetails: vi.fn(),
+  fetchHealth: vi.fn(),
+  fetchMarketStatuses: vi.fn(),
   fetchSymbolSearch: vi.fn(),
   addWatchItem: vi.fn(),
   deleteWatchItem: vi.fn()
@@ -37,6 +52,10 @@ const quotes: Quote[] = [
     price: 192.4,
     change: 2.4,
     change_percent: 1.26,
+    open: 190,
+    high: 195,
+    low: 188,
+    previous_close: 190,
     currency: "USD",
     status: { status: "ok", source: "yfinance", updated_at: "2026-06-17T00:00:00+00:00" }
   },
@@ -48,6 +67,10 @@ const quotes: Quote[] = [
     price: 1500.5,
     change: 12,
     change_percent: 0.81,
+    open: 1488,
+    high: 1508,
+    low: 1480,
+    previous_close: 1488.5,
     currency: "CNY",
     status: { status: "ok", source: "AKShare", updated_at: "2026-06-17T00:00:00+00:00" }
   }
@@ -93,6 +116,32 @@ const symbolResults: SymbolSearchResult[] = [
   { market: "a", symbol: "600519", name: "贵州茅台", source: "AKShare / Eastmoney A-share" }
 ];
 
+const marketStatuses: MarketStatus[] = [
+  { market: "a", state: "trading", label: "交易中", timezone: "Asia/Shanghai", session: "09:30-11:30 / 13:00-15:00", updated_at: "2026-06-17T00:00:00+00:00" },
+  { market: "hk", state: "closed", label: "休市", timezone: "Asia/Hong_Kong", session: "09:30-12:00 / 13:00-16:00", updated_at: "2026-06-17T00:00:00+00:00" },
+  { market: "us", state: "pre_market", label: "盘前", timezone: "America/New_York", session: "09:30-16:00", updated_at: "2026-06-17T00:00:00+00:00" }
+];
+
+const health: HealthResponse = {
+  status: "partial",
+  services: [
+    { name: "FastAPI", status: "ok", source: "local api", updated_at: "2026-06-17T00:00:00+00:00" },
+    { name: "Cache", status: "ok", source: "InMemoryJsonCache", updated_at: "2026-06-17T00:00:00+00:00" },
+    { name: "Quotes", status: "ok", source: "AKShare", updated_at: "2026-06-17T00:00:00+00:00" },
+    { name: "Gold", status: "ok", source: "AKShare", updated_at: "2026-06-17T00:00:00+00:00" },
+    { name: "Sectors", status: "unavailable", source: "fake-sector", updated_at: "2026-06-17T00:00:00+00:00" }
+  ]
+};
+
+const sectorDetail: SectorDetailResponse = {
+  market: "a",
+  sector_name: "机器人概念",
+  status: { status: "ok", source: "AKShare detail", updated_at: "2026-06-17T00:00:00+00:00" },
+  items: [
+    { symbol: "300024", name: "机器人", price: 18.2, change_percent: 3.8, volume: 45000000, source: "AKShare detail" }
+  ]
+};
+
 describe("App", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -100,6 +149,9 @@ describe("App", () => {
     vi.mocked(fetchQuotes).mockResolvedValue(quotes);
     vi.mocked(fetchGold).mockResolvedValue(gold);
     vi.mocked(fetchSectors).mockImplementation(async (market) => sectors[market]);
+    vi.mocked(fetchSectorDetails).mockResolvedValue(sectorDetail);
+    vi.mocked(fetchHealth).mockResolvedValue(health);
+    vi.mocked(fetchMarketStatuses).mockResolvedValue(marketStatuses);
     vi.mocked(fetchSymbolSearch).mockResolvedValue([]);
     vi.mocked(addWatchItem).mockResolvedValue({ id: "us:TSLA", market: "us", symbol: "TSLA", name: "Tesla" });
     vi.mocked(deleteWatchItem).mockResolvedValue({ deleted: true });
@@ -110,6 +162,8 @@ describe("App", () => {
     vi.mocked(fetchQuotes).mockReturnValue(new Promise(() => {}));
     vi.mocked(fetchGold).mockReturnValue(new Promise(() => {}));
     vi.mocked(fetchSectors).mockReturnValue(new Promise(() => {}));
+    vi.mocked(fetchHealth).mockReturnValue(new Promise(() => {}));
+    vi.mocked(fetchMarketStatuses).mockReturnValue(new Promise(() => {}));
 
     render(<App />);
 
@@ -129,6 +183,24 @@ describe("App", () => {
     expect(screen.getAllByText("已报价 1/1")).toHaveLength(2);
     expect(screen.getByText("暂无板块排行")).toBeInTheDocument();
     expect(screen.getByText("Technology")).toBeInTheDocument();
+    expect(screen.getByText("交易中")).toBeInTheDocument();
+    expect(screen.getByText("接口健康")).toBeInTheDocument();
+    expect(screen.getByText("Cache")).toBeInTheDocument();
+    expect(screen.getAllByText("更新").length).toBeGreaterThan(0);
+    expect(screen.getByLabelText("日内区间 AAPL")).toBeInTheDocument();
+  });
+
+  it("loads sector constituents when a sector row is selected", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    await screen.findByText("机器人概念");
+
+    await user.click(screen.getByRole("button", { name: /查看机器人概念成分/ }));
+
+    expect(fetchSectorDetails).toHaveBeenCalledWith("a", "机器人概念");
+    expect(await screen.findByText("板块成分")).toBeInTheDocument();
+    expect(screen.getByText("机器人")).toBeInTheDocument();
+    expect(screen.getByText("300024")).toBeInTheDocument();
   });
 
   it("renders the watchlist before slower quotes finish", async () => {

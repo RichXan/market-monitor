@@ -1,8 +1,32 @@
-import { Activity, AlertTriangle, Plus, RefreshCw, Trash2 } from "lucide-react";
+import { Activity, AlertTriangle, Clock3, Plus, Radio, RefreshCw, Trash2 } from "lucide-react";
 import { FormEvent, useEffect, useMemo, useState } from "react";
-import { addWatchItem, deleteWatchItem, fetchGold, fetchQuotes, fetchSectors, fetchSymbolSearch, fetchWatchlist } from "./api";
+import {
+  addWatchItem,
+  deleteWatchItem,
+  fetchGold,
+  fetchHealth,
+  fetchMarketStatuses,
+  fetchQuotes,
+  fetchSectorDetails,
+  fetchSectors,
+  fetchSymbolSearch,
+  fetchWatchlist
+} from "./api";
 import { formatCurrency, formatPercent, movementClass } from "./format";
-import type { GoldQuote, Market, Quote, SectorResponse, SymbolSearchResult, WatchItem, WatchItemPayload } from "./types";
+import type {
+  GoldQuote,
+  HealthResponse,
+  HealthService,
+  Market,
+  MarketStatus,
+  Quote,
+  SectorDetailResponse,
+  SectorResponse,
+  SectorItem,
+  SymbolSearchResult,
+  WatchItem,
+  WatchItemPayload
+} from "./types";
 import "./styles.css";
 
 const markets: Market[] = ["a", "hk", "us"];
@@ -43,6 +67,19 @@ const initialSectors: SectorResponse[] = markets.map((market) => ({
   }
 }));
 
+const initialHealth: HealthResponse = {
+  status: "partial",
+  services: [
+    {
+      name: "FastAPI",
+      status: "partial",
+      source: "加载中",
+      updated_at: "",
+      message: "正在检查接口状态"
+    }
+  ]
+};
+
 function statusLabel(status: string): string {
   if (status === "ok") return "在线";
   if (status === "partial") return "加载中";
@@ -56,6 +93,24 @@ function formatCompact(value?: number | null): string {
     notation: "compact",
     maximumFractionDigits: 2
   }).format(value);
+}
+
+function formatTime(value?: string | null): string {
+  if (!value) return "--";
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return value.slice(0, 16);
+  return parsed.toLocaleTimeString("zh-CN", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false
+  });
+}
+
+function rangePosition(value?: number | null, low?: number | null, high?: number | null): number {
+  if (value === null || value === undefined || low === null || low === undefined || high === null || high === undefined || high <= low) {
+    return 50;
+  }
+  return Math.max(0, Math.min(100, ((value - low) / (high - low)) * 100));
 }
 
 function goldPrice(gold: GoldQuote): string {
@@ -95,6 +150,11 @@ export default function App() {
   const [quotes, setQuotes] = useState<Quote[]>([]);
   const [gold, setGold] = useState<GoldQuote>(initialGold);
   const [sectors, setSectors] = useState<SectorResponse[]>(initialSectors);
+  const [health, setHealth] = useState<HealthResponse>(initialHealth);
+  const [marketStatuses, setMarketStatuses] = useState<MarketStatus[]>([]);
+  const [sectorDetail, setSectorDetail] = useState<SectorDetailResponse | null>(null);
+  const [sectorDetailLoading, setSectorDetailLoading] = useState(false);
+  const [sectorDetailError, setSectorDetailError] = useState<string | null>(null);
   const [pendingLoads, setPendingLoads] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [form, setForm] = useState<WatchItemPayload>({ market: "us", symbol: "", name: "" });
@@ -108,11 +168,17 @@ export default function App() {
     return new Map(quotes.map((quote) => [quote.id, quote]));
   }, [quotes]);
 
+  const marketStatusByMarket = useMemo(() => {
+    return new Map(marketStatuses.map((status) => [status.market, status]));
+  }, [marketStatuses]);
+
   async function loadCoreData(preserveItems: WatchItem[] = []) {
     const failures: string[] = [];
     const watchlistPromise = fetchWatchlist();
     const quotesPromise = fetchQuotes();
     const goldPromise = fetchGold();
+    const healthPromise = fetchHealth();
+    const marketStatusesPromise = fetchMarketStatuses();
 
     try {
       const items = await watchlistPromise;
@@ -121,13 +187,24 @@ export default function App() {
       failures.push("自选列表");
     }
 
-    const [quotesResult, goldResult] = await Promise.allSettled([quotesPromise, goldPromise]);
+    const [quotesResult, goldResult, healthResult, marketStatusesResult] = await Promise.allSettled([
+      quotesPromise,
+      goldPromise,
+      healthPromise,
+      marketStatusesPromise
+    ]);
 
     if (quotesResult.status === "fulfilled") setQuotes(quotesResult.value);
     else failures.push("行情");
 
     if (goldResult.status === "fulfilled") setGold(goldResult.value);
     else failures.push("黄金");
+
+    if (healthResult.status === "fulfilled") setHealth(healthResult.value);
+    else failures.push("接口健康");
+
+    if (marketStatusesResult.status === "fulfilled") setMarketStatuses(marketStatusesResult.value);
+    else failures.push("交易时段");
 
     return failures;
   }
@@ -265,6 +342,19 @@ export default function App() {
     await refresh();
   }
 
+  async function handleSelectSector(market: Market, item: SectorItem) {
+    setSectorDetailLoading(true);
+    setSectorDetailError(null);
+    setSectorDetail(null);
+    try {
+      setSectorDetail(await fetchSectorDetails(market, item.name));
+    } catch (exc) {
+      setSectorDetailError(exc instanceof Error ? exc.message : "板块成分加载失败");
+    } finally {
+      setSectorDetailLoading(false);
+    }
+  }
+
   return (
     <main className="app-shell">
       <header className="topbar">
@@ -300,9 +390,10 @@ export default function App() {
           return (
             <div key={market}>
               <span className="strip-label">{marketLabels[market]}</span>
-              <strong>自选 {marketItems.length}</strong>
+              <strong>{marketStatusByMarket.get(market)?.label ?? "状态读取中"}</strong>
+              <small>自选 {marketItems.length}</small>
               <small>已报价 {quoted}/{marketItems.length}</small>
-              <small>{marketHint[market]}</small>
+              <small>{marketStatusByMarket.get(market)?.session ?? marketHint[market]}</small>
             </div>
           );
         })}
@@ -381,11 +472,52 @@ export default function App() {
         </form>
       </section>
 
+      <HealthPanel health={health} />
+
       <section className="dashboard-grid">
         <WatchlistPanel watchlist={watchlist} quotesById={quotesById} onDelete={handleDelete} />
-        <SectorsPanel sectors={sectors} />
+        <SectorsPanel
+          sectors={sectors}
+          sectorDetail={sectorDetail}
+          sectorDetailLoading={sectorDetailLoading}
+          sectorDetailError={sectorDetailError}
+          onSelectSector={handleSelectSector}
+        />
       </section>
     </main>
+  );
+}
+
+function HealthPanel({ health }: { health: HealthResponse }) {
+  return (
+    <section className="health-panel panel" aria-label="接口健康">
+      <div className="panel-header">
+        <div>
+          <h2>接口健康</h2>
+          <p>行情源、缓存与板块服务状态</p>
+        </div>
+        <span className={`status-badge ${health.status}`}>{statusLabel(health.status)}</span>
+      </div>
+      <div className="health-list">
+        {health.services.map((service) => (
+          <HealthServiceRow service={service} key={service.name} />
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function HealthServiceRow({ service }: { service: HealthService }) {
+  return (
+    <div className="health-row">
+      <Radio aria-hidden="true" size={15} />
+      <strong>{service.name}</strong>
+      <span className={`mini-status ${service.status}`}>{statusLabel(service.status)}</span>
+      <small>{service.source}</small>
+      <small>
+        <span>更新</span> {formatTime(service.updated_at)}
+      </small>
+    </div>
   );
 }
 
@@ -412,8 +544,9 @@ function WatchlistPanel({
           <span>标的</span>
           <span>最新</span>
           <span>涨跌幅</span>
+          <span>日内</span>
           <span>成交量</span>
-          <span>来源</span>
+          <span>更新</span>
           <span></span>
         </div>
         {watchlist.length === 0 ? (
@@ -431,8 +564,14 @@ function WatchlistPanel({
                 </span>
                 <span>{quote ? formatCurrency(quote.price, quote.currency) : "--"}</span>
                 <span className={movement}>{formatPercent(quote?.change_percent)}</span>
+                <span>
+                  <PriceRange quote={quote} symbol={item.symbol} />
+                </span>
                 <span>{formatCompact(quote?.volume)}</span>
-                <span className="source-cell">{quote?.status.source ?? marketHint[item.market]}</span>
+                <span className="source-cell">
+                  <span>更新</span> {formatTime(quote?.status.updated_at)}
+                  <small>{quote?.status.source ?? marketHint[item.market]}</small>
+                </span>
                 <button className="icon-button ghost" onClick={() => onDelete(item.id)} title={`删除 ${item.symbol}`} aria-label={`删除 ${item.symbol}`}>
                   <Trash2 aria-hidden="true" size={16} />
                 </button>
@@ -445,13 +584,44 @@ function WatchlistPanel({
   );
 }
 
+function PriceRange({ quote, symbol }: { quote?: Quote; symbol: string }) {
+  if (!quote || quote.low === null || quote.low === undefined || quote.high === null || quote.high === undefined) {
+    return <span className="range-empty">--</span>;
+  }
+  const marker = rangePosition(quote.price, quote.low, quote.high);
+  const open = rangePosition(quote.open, quote.low, quote.high);
+  return (
+    <span className="range-cell" aria-label={`日内区间 ${symbol}`}>
+      <span className="range-track">
+        <span className="range-open" style={{ left: `${open}%` }} />
+        <span className="range-marker" style={{ left: `${marker}%` }} />
+      </span>
+      <small>
+        L {formatCurrency(quote.low, quote.currency)} / H {formatCurrency(quote.high, quote.currency)}
+      </small>
+    </span>
+  );
+}
+
 function emptySectorTitle(sector: SectorResponse): string {
   if (sector.status.status === "partial") return "加载中";
   if (sector.status.status === "error") return "接口异常";
   return "暂无板块排行";
 }
 
-function SectorsPanel({ sectors }: { sectors: SectorResponse[] }) {
+function SectorsPanel({
+  sectors,
+  sectorDetail,
+  sectorDetailLoading,
+  sectorDetailError,
+  onSelectSector
+}: {
+  sectors: SectorResponse[];
+  sectorDetail: SectorDetailResponse | null;
+  sectorDetailLoading: boolean;
+  sectorDetailError: string | null;
+  onSelectSector: (market: Market, item: SectorItem) => Promise<void>;
+}) {
   return (
     <section className="sector-stack" aria-label="活跃板块">
       {sectors.map((sector) => (
@@ -466,11 +636,11 @@ function SectorsPanel({ sectors }: { sectors: SectorResponse[] }) {
           {sector.items.length > 0 ? (
             <div className="sector-list">
               {sector.items.slice(0, 6).map((item) => (
-                <div className="sector-row" key={item.name}>
+                <button className="sector-row sector-button" key={item.name} onClick={() => onSelectSector(sector.market, item)} aria-label={`查看${item.name}成分`}>
                   <span>{item.name}</span>
                   <strong className={movementClass(item.change_percent)}>{formatPercent(item.change_percent)}</strong>
                   <small>{formatCompact(item.amount ?? item.volume)}</small>
-                </div>
+                </button>
               ))}
             </div>
           ) : (
@@ -484,6 +654,47 @@ function SectorsPanel({ sectors }: { sectors: SectorResponse[] }) {
           )}
         </div>
       ))}
+      <SectorDetailPanel detail={sectorDetail} loading={sectorDetailLoading} error={sectorDetailError} />
     </section>
+  );
+}
+
+function SectorDetailPanel({
+  detail,
+  loading,
+  error
+}: {
+  detail: SectorDetailResponse | null;
+  loading: boolean;
+  error: string | null;
+}) {
+  return (
+    <div className="panel sector-detail-panel">
+      <div className="panel-header">
+        <div>
+          <h2>板块成分</h2>
+          <p>{detail ? `${marketLabels[detail.market]} / ${detail.sector_name}` : "点击上方板块查看关联标的"}</p>
+        </div>
+        {loading ? <Clock3 aria-hidden="true" size={18} /> : detail ? <span className={`status-badge ${detail.status.status}`}>{statusLabel(detail.status.status)}</span> : null}
+      </div>
+      {error ? <div className="unavailable">{error}</div> : null}
+      {loading ? <div className="empty-table-row">加载板块成分</div> : null}
+      {!loading && detail && detail.items.length > 0 ? (
+        <div className="constituent-list">
+          {detail.items.slice(0, 10).map((item) => (
+            <div className="constituent-row" key={`${item.symbol}:${item.name}`}>
+              <span>
+                <strong>{item.name}</strong>
+                <small>{item.symbol}</small>
+              </span>
+              <span>{formatCurrency(item.price, item.currency ?? "CNY")}</span>
+              <strong className={movementClass(item.change_percent)}>{formatPercent(item.change_percent)}</strong>
+              <small>{formatCompact(item.amount ?? item.volume)}</small>
+            </div>
+          ))}
+        </div>
+      ) : null}
+      {!loading && detail && detail.items.length === 0 ? <div className="empty-table-row">暂无可用成分数据</div> : null}
+    </div>
   );
 }

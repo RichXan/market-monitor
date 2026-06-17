@@ -3,7 +3,18 @@ import time
 from fastapi.testclient import TestClient
 
 from app.main import create_app
-from app.models import GoldQuote, Market, ProviderStatus, Quote, SectorResponse, SymbolSearchResult, WatchItemCreate
+from app.models import (
+    GoldQuote,
+    Market,
+    ProviderStatus,
+    Quote,
+    SectorConstituent,
+    SectorDetailResponse,
+    SectorItem,
+    SectorResponse,
+    SymbolSearchResult,
+    WatchItemCreate,
+)
 from app.store import WatchlistStore
 
 
@@ -72,12 +83,33 @@ class FakeProvider:
     def get_sectors(self, market):
         return SectorResponse(
             market=market,
-            items=[],
+            items=[SectorItem(name=f"{market.value}-active", change_percent=1.23)],
             status=ProviderStatus(
                 status="unavailable",
                 source="fake-sector",
                 updated_at="2026-06-17T00:00:00+00:00",
                 message="strict mode unavailable",
+            ),
+        )
+
+    def get_sector_details(self, market, sector_name, limit=12):
+        return SectorDetailResponse(
+            market=market,
+            sector_name=sector_name,
+            items=[
+                SectorConstituent(
+                    symbol="600519",
+                    name="贵州茅台",
+                    price=1500.0,
+                    change_percent=0.67,
+                    volume=1200000,
+                    source="fake-detail",
+                )
+            ],
+            status=ProviderStatus(
+                status="ok",
+                source="fake-detail",
+                updated_at="2026-06-17T00:00:00+00:00",
             ),
         )
 
@@ -96,13 +128,34 @@ class SlowOverviewProvider(FakeProvider):
         return super().get_sectors(market)
 
 
+class SlowSectorProvider(FakeProvider):
+    def get_sectors(self, market):
+        time.sleep(0.2)
+        return super().get_sectors(market)
+
+
 class CountingProvider(FakeProvider):
     def __init__(self) -> None:
         self.quote_calls = 0
+        self.gold_calls = 0
+        self.sector_calls = 0
+        self.sector_detail_calls = 0
 
     def get_quotes(self, items):
         self.quote_calls += 1
         return super().get_quotes(items)
+
+    def get_gold_quote(self):
+        self.gold_calls += 1
+        return super().get_gold_quote()
+
+    def get_sectors(self, market):
+        self.sector_calls += 1
+        return super().get_sectors(market)
+
+    def get_sector_details(self, market, sector_name, limit=12):
+        self.sector_detail_calls += 1
+        return super().get_sector_details(market, sector_name, limit=limit)
 
 
 class FakeJsonCache:
@@ -130,6 +183,20 @@ def test_health_endpoint(tmp_path):
 
     assert response.status_code == 200
     assert response.json()["status"] == "ok"
+    services = {item["name"]: item for item in response.json()["services"]}
+    assert {"FastAPI", "Cache", "Quotes", "Gold", "Sectors"}.issubset(services)
+    assert services["Gold"]["source"] == "fake-gold"
+
+
+def test_market_status_endpoint(tmp_path):
+    client = make_client(tmp_path)
+
+    response = client.get("/api/market-status")
+
+    assert response.status_code == 200
+    assert {item["market"] for item in response.json()} == {"a", "hk", "us"}
+    assert all(item["label"] for item in response.json())
+    assert all(item["timezone"] for item in response.json())
 
 
 def test_watchlist_crud_endpoints(tmp_path):
@@ -194,6 +261,17 @@ def test_quote_gold_sector_and_overview_endpoints(tmp_path):
     assert len(overview.json()["sectors"]) == 3
 
 
+def test_sector_details_endpoint(tmp_path):
+    client = make_client(tmp_path)
+
+    response = client.get("/api/sector-details", params={"market": "a", "sector": "白酒"})
+
+    assert response.status_code == 200
+    assert response.json()["sector_name"] == "白酒"
+    assert response.json()["items"][0]["symbol"] == "600519"
+    assert response.json()["items"][0]["source"] == "fake-detail"
+
+
 def test_quotes_endpoint_uses_json_cache(tmp_path):
     store = WatchlistStore(tmp_path / "watchlist.json")
     provider = CountingProvider()
@@ -208,6 +286,64 @@ def test_quotes_endpoint_uses_json_cache(tmp_path):
     assert provider.quote_calls == 1
     assert second.json() == first.json()
     assert cache.set_calls
+
+
+def test_background_refresh_preloads_json_cache(tmp_path):
+    store = WatchlistStore(tmp_path / "watchlist.json")
+    provider = CountingProvider()
+    cache = FakeJsonCache()
+
+    app = create_app(store=store, provider=provider, cache=cache, background_refresh_seconds=0.01)
+    with TestClient(app):
+        deadline = time.time() + 1
+        while time.time() < deadline:
+            has_quotes = any(key.startswith("quotes:") for key in cache.values)
+            has_gold = "gold:Au99.99" in cache.values
+            has_sectors = all(f"sectors:{market.value}" in cache.values for market in [Market.A, Market.HK, Market.US])
+            has_details = any(key.startswith("sector-details:") for key in cache.values)
+            if has_quotes and has_gold and has_sectors and has_details:
+                break
+            time.sleep(0.02)
+
+    assert provider.quote_calls >= 1
+    assert provider.gold_calls >= 1
+    assert provider.sector_calls >= 3
+    assert provider.sector_detail_calls >= 1
+    assert any(key.startswith("quotes:") for key in cache.values)
+    assert "gold:Au99.99" in cache.values
+    assert all(f"sectors:{market.value}" in cache.values for market in [Market.A, Market.HK, Market.US])
+    assert any(key.startswith("sector-details:") for key in cache.values)
+
+
+def test_background_refresh_reports_timeout_in_health(tmp_path):
+    store = WatchlistStore(tmp_path / "watchlist.json")
+    provider = SlowSectorProvider()
+    cache = FakeJsonCache()
+    fast_provider = FakeProvider()
+    for market in [Market.A, Market.HK, Market.US]:
+        cache.set_json(f"sectors:{market.value}", fast_provider.get_sectors(market).model_dump(mode="json"), 60)
+
+    app = create_app(
+        store=store,
+        provider=provider,
+        cache=cache,
+        background_refresh_seconds=0.5,
+        background_provider_timeout_seconds=0.01,
+    )
+    with TestClient(app) as client:
+        background_service = None
+        deadline = time.time() + 1
+        while time.time() < deadline:
+            response = client.get("/api/health")
+            services = {item["name"]: item for item in response.json()["services"]}
+            background_service = services["Background refresh"]
+            if background_service["status"] == "error":
+                break
+            time.sleep(0.02)
+
+    assert background_service is not None
+    assert background_service["status"] == "error"
+    assert "timed out" in background_service["message"]
 
 
 def test_symbol_search_endpoint(tmp_path):

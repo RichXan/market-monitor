@@ -41,6 +41,28 @@ class ProviderStatus(BaseModel):
     message: str | None = None
 
 
+class MarketStatus(BaseModel):
+    market: Market
+    state: Literal["trading", "break", "pre_market", "after_hours", "closed"]
+    label: str
+    timezone: str
+    session: str
+    updated_at: str
+
+
+class HealthService(BaseModel):
+    name: str
+    status: Literal["ok", "partial", "unavailable", "error"]
+    source: str
+    updated_at: str
+    message: str | None = None
+
+
+class HealthResponse(BaseModel):
+    status: Literal["ok", "partial", "unavailable", "error"]
+    services: list[HealthService]
+
+
 class Quote(BaseModel):
     id: str
     market: Market
@@ -80,6 +102,24 @@ class SectorResponse(BaseModel):
     market: Market
     status: ProviderStatus
     items: list[SectorItem]
+
+
+class SectorConstituent(BaseModel):
+    symbol: str
+    name: str
+    price: float | None = None
+    change_percent: float | None = None
+    volume: float | None = None
+    amount: float | None = None
+    currency: str | None = None
+    source: str
+
+
+class SectorDetailResponse(BaseModel):
+    market: Market
+    sector_name: str
+    status: ProviderStatus
+    items: list[SectorConstituent]
 
 
 class SymbolSearchResult(BaseModel):

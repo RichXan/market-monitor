@@ -8,7 +8,7 @@ Local market dashboard for A-share, Hong Kong, US equity, and Shanghai Gold Exch
 - Hong Kong quotes: AKShare / Eastmoney delayed quote feed, with yfinance/Yahoo single-symbol fallback when AKShare quote feeds are slow or unavailable
 - US quotes: yfinance / Yahoo Finance
 - Gold: AKShare / Shanghai Gold Exchange `Au99.99`
-- Hong Kong and US sector panels use strict mode. They show an unavailable state unless a reliable free daily active sector ranking source is configured.
+- Hong Kong sector activity is aggregated from Yahoo Finance active-stock screeners. US sector activity uses liquid sector ETF proxies from Yahoo Finance.
 
 ## Run
 
@@ -34,7 +34,7 @@ docker compose logs -f frontend
 docker compose down
 ```
 
-The first startup installs Python and Node dependencies inside containers, so it can take a few minutes. The Compose stack uses Redis for backend quote/gold/sector caching and persists Redis data in the `redis-data` volume. The watchlist remains in `backend/data/watchlist.json`.
+The first startup installs Python and Node dependencies inside containers, so it can take a few minutes. The Compose stack uses Redis for backend quote/gold/sector caching, refreshes cache entries in the backend every 60 seconds, and persists Redis data in the `redis-data` volume. The watchlist remains in `backend/data/watchlist.json`.
 
 Local development without Docker:
 
@@ -80,7 +80,7 @@ The watchlist is stored in `backend/data/watchlist.json` by default. Set `MARKET
 
 ## Cache
 
-The backend caches quote, gold, and sector API responses to reduce repeated calls to AKShare and Yahoo Finance. By default it uses an in-process memory cache.
+The backend caches quote, gold, sector, and sector-detail API responses to reduce repeated calls to AKShare and Yahoo Finance. It also starts a background refresh task that preloads the watchlist, gold, sector panels, and the top sector-detail panels into the configured cache. By default it uses an in-process memory cache.
 
 To use Redis instead, start Redis locally or point to an existing Redis instance before starting the backend:
 
@@ -94,3 +94,6 @@ Optional TTL settings:
 - `MARKET_MONITOR_QUOTE_CACHE_TTL_SECONDS`, default `15`
 - `MARKET_MONITOR_GOLD_CACHE_TTL_SECONDS`, default `15`
 - `MARKET_MONITOR_SECTOR_CACHE_TTL_SECONDS`, default `60`
+- `MARKET_MONITOR_BACKGROUND_REFRESH_SECONDS`, default `60`; set to `0` to disable scheduled refresh
+- `MARKET_MONITOR_BACKGROUND_SECTOR_DETAIL_COUNT`, default `3`; controls how many top sectors per market are preloaded for detail views
+- `MARKET_MONITOR_BACKGROUND_PROVIDER_TIMEOUT_SECONDS`, default `30`; caps each scheduled provider call so slow sources do not leave the refresh worker stuck

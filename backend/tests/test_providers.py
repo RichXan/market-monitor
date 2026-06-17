@@ -185,6 +185,25 @@ class FakeAKShare:
             ]
         )
 
+    def stock_board_industry_cons_em(self, symbol: str):
+        if symbol != "半导体":
+            return pd.DataFrame()
+        return pd.DataFrame(
+            [
+                {"代码": "688981", "名称": "中芯国际", "最新价": 88.2, "涨跌幅": 4.5, "成交量": 30000000},
+                {"代码": "603986", "名称": "兆易创新", "最新价": 120.5, "涨跌幅": 2.1, "成交量": 12000000},
+            ]
+        )
+
+    def stock_board_concept_cons_em(self, symbol: str):
+        if symbol != "机器人概念":
+            return pd.DataFrame()
+        return pd.DataFrame(
+            [
+                {"代码": "300024", "名称": "机器人", "最新价": 18.2, "涨跌幅": 3.8, "成交量": 45000000}
+            ]
+        )
+
 
 class CountingAKShare(FakeAKShare):
     def __init__(self) -> None:
@@ -401,6 +420,25 @@ def test_provider_returns_yahoo_hk_sector_activity_and_us_sector_proxies():
     assert [item.name for item in us.items[:2]] == ["Technology", "Health Care"]
     assert us.items[-1].name == "Financials"
     assert us.items[0].change_percent == 5.0
+
+
+def test_provider_returns_sector_details_for_a_hk_and_us():
+    provider = MarketDataProvider(ak_module=FakeAKShare(), yf_module=FakeYFinance())
+
+    a_detail = provider.get_sector_details(Market.A, "半导体")
+    hk_detail = provider.get_sector_details(Market.HK, "通信服务")
+    us_detail = provider.get_sector_details(Market.US, "Technology")
+
+    assert a_detail.status.status == "ok"
+    assert [(item.symbol, item.name) for item in a_detail.items[:2]] == [
+        ("688981", "中芯国际"),
+        ("603986", "兆易创新"),
+    ]
+    assert hk_detail.status.status == "ok"
+    assert hk_detail.items[0].symbol == "0700.HK"
+    assert us_detail.status.status == "ok"
+    assert us_detail.items[0].symbol == "XLK"
+    assert us_detail.items[0].name == "Technology ETF"
 
 
 def test_provider_caches_expensive_akshare_quote_frames():

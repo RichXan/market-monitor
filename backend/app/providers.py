@@ -11,6 +11,8 @@ from app.models import (
     Market,
     ProviderStatus,
     Quote,
+    SectorConstituent,
+    SectorDetailResponse,
     SectorItem,
     SectorResponse,
     SymbolSearchResult,
@@ -193,6 +195,13 @@ class MarketDataProvider:
         if market == Market.US:
             return self._get_us_sector_etfs()
         return self._cached("sectors:a", self._get_a_share_sectors)
+
+    def get_sector_details(self, market: Market, sector_name: str, limit: int = 12) -> SectorDetailResponse:
+        if market == Market.US:
+            return self._get_us_sector_details(sector_name, limit)
+        if market == Market.HK:
+            return self._get_hk_sector_details(sector_name, limit)
+        return self._get_a_sector_details(sector_name, limit)
 
     def _get_a_share_sectors(self) -> SectorResponse:
         errors: list[str] = []
@@ -512,6 +521,129 @@ class MarketDataProvider:
             ),
         )
 
+    def _get_us_sector_details(self, sector_name: str, limit: int) -> SectorDetailResponse:
+        symbols = {name: symbol for name, symbol in US_SECTOR_ETFS}
+        symbol = symbols.get(sector_name)
+        if symbol is None:
+            return SectorDetailResponse(
+                market=Market.US,
+                sector_name=sector_name,
+                items=[],
+                status=_status(
+                    "unavailable",
+                    "yfinance / Yahoo Finance sector ETFs",
+                    f"No ETF proxy is configured for {sector_name}.",
+                ),
+            )
+
+        quote = self._quote_from_yfinance(
+            WatchItem(id=f"us:{symbol}", market=Market.US, symbol=symbol, name=f"{sector_name} ETF")
+        )
+        item = SectorConstituent(
+            symbol=symbol,
+            name=f"{sector_name} ETF",
+            price=quote.price,
+            change_percent=quote.change_percent,
+            volume=quote.volume,
+            amount=quote.amount,
+            currency=quote.currency,
+            source=quote.status.source,
+        )
+        return SectorDetailResponse(
+            market=Market.US,
+            sector_name=sector_name,
+            items=[item][:limit],
+            status=_status(
+                quote.status.status if quote.status.status in {"ok", "partial", "unavailable", "error"} else "ok",
+                "yfinance / Yahoo Finance sector ETFs",
+                "US sector constituents are represented by the liquid sector ETF proxy.",
+            ),
+        )
+
+    def _get_hk_sector_details(self, sector_name: str, limit: int) -> SectorDetailResponse:
+        source = "yfinance / Yahoo Finance HK active stocks"
+        try:
+            quotes = self._load_hk_active_quotes()
+        except Exception as exc:
+            return SectorDetailResponse(
+                market=Market.HK,
+                sector_name=sector_name,
+                items=[],
+                status=_status("unavailable", source, str(exc)),
+            )
+
+        items: list[SectorConstituent] = []
+        for quote in quotes:
+            try:
+                raw_sector = self._sector_for_hk_quote(quote)
+            except Exception:
+                raw_sector = self._infer_hk_sector_from_quote(quote)
+            sector = HK_SECTOR_LABELS.get(raw_sector or "", raw_sector or "")
+            if sector != sector_name:
+                continue
+            symbol = str(quote.get("symbol") or "")
+            items.append(
+                SectorConstituent(
+                    symbol=symbol,
+                    name=str(quote.get("shortName") or quote.get("longName") or symbol),
+                    price=_float(quote.get("regularMarketPrice")),
+                    change_percent=_float(quote.get("regularMarketChangePercent")),
+                    volume=_float(quote.get("regularMarketVolume")),
+                    amount=(_float(quote.get("regularMarketPrice")) or 0) * (_float(quote.get("regularMarketVolume")) or 0) or None,
+                    currency="HKD",
+                    source=source,
+                )
+            )
+            if len(items) >= limit:
+                break
+
+        return SectorDetailResponse(
+            market=Market.HK,
+            sector_name=sector_name,
+            items=items,
+            status=_status(
+                "ok" if items else "unavailable",
+                source,
+                None if items else f"No active Hong Kong stock rows matched {sector_name}.",
+            ),
+        )
+
+    def _get_a_sector_details(self, sector_name: str, limit: int) -> SectorDetailResponse:
+        errors: list[str] = []
+        loaders: list[tuple[str, Callable[[], pd.DataFrame]]] = [
+            ("AKShare / Eastmoney industry constituents", lambda: self.ak.stock_board_industry_cons_em(symbol=sector_name)),
+            ("AKShare / Eastmoney concept constituents", lambda: self.ak.stock_board_concept_cons_em(symbol=sector_name)),
+        ]
+
+        for source, loader in loaders:
+            try:
+                frame = self._call_provider(loader, source, timeout_seconds=self.sector_timeout_seconds)
+            except Exception as exc:
+                errors.append(f"{source}: {exc}")
+                continue
+
+            items = self._frame_to_sector_constituents(frame, source)
+            if items:
+                items.sort(key=lambda item: item.change_percent if item.change_percent is not None else -9999, reverse=True)
+                return SectorDetailResponse(
+                    market=Market.A,
+                    sector_name=sector_name,
+                    items=items[:limit],
+                    status=_status("ok", source, "; ".join(errors) if errors else None),
+                )
+            errors.append(f"{source}: empty response")
+
+        return SectorDetailResponse(
+            market=Market.A,
+            sector_name=sector_name,
+            items=[],
+            status=_status(
+                "unavailable",
+                "AKShare / Eastmoney sector constituents",
+                f"A-share sector constituents are unavailable: {'; '.join(errors) or 'No rows returned.'}",
+            ),
+        )
+
     def _quote_from_frame(
         self,
         item: WatchItem,
@@ -786,6 +918,29 @@ class MarketDataProvider:
                     change_percent=_float(_first_present(row, ["涨跌幅", "行业-涨跌幅", "changePercent"])),
                     volume=_float(_first_present(row, ["成交量", "总成交量", "volume"])),
                     amount=_float(_first_present(row, ["成交额", "总成交额", "amount"])),
+                )
+            )
+        return items
+
+    def _frame_to_sector_constituents(self, frame: pd.DataFrame, source: str) -> list[SectorConstituent]:
+        items: list[SectorConstituent] = []
+        if frame.empty:
+            return items
+        for _, row in frame.iterrows():
+            symbol = _first_present(row, ["代码", "symbol", "code", "股票代码"])
+            name = _first_present(row, ["名称", "name", "股票名称", "中文名称"])
+            if symbol is None or name is None:
+                continue
+            items.append(
+                SectorConstituent(
+                    symbol=normalize_symbol_for_market(Market.A, str(symbol)),
+                    name=str(name),
+                    price=_float(_first_present(row, ["最新价", "现价", "price"])),
+                    change_percent=_float(_first_present(row, ["涨跌幅", "changePercent"])),
+                    volume=_float(_first_present(row, ["成交量", "volume"])),
+                    amount=_float(_first_present(row, ["成交额", "amount"])),
+                    currency="CNY",
+                    source=source,
                 )
             )
         return items

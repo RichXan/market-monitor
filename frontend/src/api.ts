@@ -1,4 +1,16 @@
-import type { GoldQuote, Market, OverviewResponse, Quote, SectorResponse, SymbolSearchResult, WatchItem, WatchItemPayload } from "./types";
+import type {
+  GoldQuote,
+  HealthResponse,
+  Market,
+  MarketStatus,
+  OverviewResponse,
+  Quote,
+  SectorDetailResponse,
+  SectorResponse,
+  SymbolSearchResult,
+  WatchItem,
+  WatchItemPayload
+} from "./types";
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, {
@@ -33,8 +45,21 @@ export function fetchGold(): Promise<GoldQuote> {
   return request<GoldQuote>("/api/gold");
 }
 
+export function fetchHealth(): Promise<HealthResponse> {
+  return request<HealthResponse>("/api/health");
+}
+
+export function fetchMarketStatuses(): Promise<MarketStatus[]> {
+  return request<MarketStatus[]>("/api/market-status");
+}
+
 export function fetchSectors(market: Market): Promise<SectorResponse> {
   return request<SectorResponse>(`/api/sectors?market=${market}`);
+}
+
+export function fetchSectorDetails(market: Market, sector: string): Promise<SectorDetailResponse> {
+  const params = new URLSearchParams({ market, sector });
+  return request<SectorDetailResponse>(`/api/sector-details?${params.toString()}`);
 }
 
 export function fetchSymbolSearch(market: Market, query: string): Promise<SymbolSearchResult[]> {

@@ -1,5 +1,6 @@
 export type Market = "a" | "hk" | "us";
 export type StatusKind = "ok" | "partial" | "unavailable" | "error";
+export type MarketState = "trading" | "break" | "pre_market" | "after_hours" | "closed";
 
 export interface ProviderStatus {
   status: StatusKind;
@@ -19,6 +20,28 @@ export interface WatchItemPayload {
   market: Market;
   symbol: string;
   name?: string | null;
+}
+
+export interface MarketStatus {
+  market: Market;
+  state: MarketState;
+  label: string;
+  timezone: string;
+  session: string;
+  updated_at: string;
+}
+
+export interface HealthService {
+  name: string;
+  status: StatusKind;
+  source: string;
+  updated_at: string;
+  message?: string | null;
+}
+
+export interface HealthResponse {
+  status: StatusKind;
+  services: HealthService[];
 }
 
 export interface Quote {
@@ -60,6 +83,24 @@ export interface SectorResponse {
   market: Market;
   status: ProviderStatus;
   items: SectorItem[];
+}
+
+export interface SectorConstituent {
+  symbol: string;
+  name: string;
+  price?: number | null;
+  change_percent?: number | null;
+  volume?: number | null;
+  amount?: number | null;
+  currency?: string | null;
+  source: string;
+}
+
+export interface SectorDetailResponse {
+  market: Market;
+  sector_name: string;
+  status: ProviderStatus;
+  items: SectorConstituent[];
 }
 
 export interface SymbolSearchResult {
