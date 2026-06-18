@@ -182,6 +182,7 @@ export default function App() {
   const [symbolSearchLoading, setSymbolSearchLoading] = useState(false);
   const [symbolSearchError, setSymbolSearchError] = useState<string | null>(null);
   const [selectedLookupKey, setSelectedLookupKey] = useState("");
+  const [healthMenuOpen, setHealthMenuOpen] = useState(false);
   const loading = pendingLoads > 0;
 
   const quotesById = useMemo(() => {
@@ -397,6 +398,7 @@ export default function App() {
           ) : (
             <span className="source-pill">{loading ? "数据加载中" : "FastAPI / AKShare / Yahoo"}</span>
           )}
+          <HealthMenu health={health} open={healthMenuOpen} onToggle={() => setHealthMenuOpen((open) => !open)} />
           <button className="icon-button" onClick={refresh} disabled={loading} title="刷新行情" aria-label="刷新行情">
             <RefreshCw aria-hidden="true" size={18} />
           </button>
@@ -510,8 +512,6 @@ export default function App() {
         </form>
       </section>
 
-      <HealthPanel health={health} />
-
       <section className="dashboard-grid">
         <WatchlistPanel watchlist={watchlist} quotesById={quotesById} onDelete={handleDelete} />
         <SectorsPanel
@@ -549,6 +549,37 @@ function IndexSummaryCard({
       <small>
         {status?.label ?? "状态读取中"} · 更新 {formatTime(index?.status.updated_at)}
       </small>
+    </div>
+  );
+}
+
+function HealthMenu({
+  health,
+  open,
+  onToggle
+}: {
+  health: HealthResponse;
+  open: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <div className="health-menu">
+      <button
+        className="icon-button"
+        onClick={onToggle}
+        title="接口健康"
+        aria-label="接口健康"
+        aria-expanded={open}
+        aria-controls="health-menu-panel"
+      >
+        <Activity aria-hidden="true" size={18} />
+        <span className={`health-status-dot ${health.status}`} />
+      </button>
+      {open ? (
+        <div className="health-popover" id="health-menu-panel">
+          <HealthPanel health={health} />
+        </div>
+      ) : null}
     </div>
   );
 }

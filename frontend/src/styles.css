@@ -84,6 +84,7 @@ h2 {
 }
 
 .topbar-actions {
+  position: relative;
   gap: 10px;
 }
 
@@ -205,8 +206,50 @@ h2 {
   margin-bottom: 12px;
 }
 
+.health-menu {
+  position: relative;
+  display: inline-flex;
+}
+
+.health-status-dot {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 8px;
+  height: 8px;
+  border: 1px solid #1b1c1f;
+  border-radius: 999px;
+  background: #d7f36f;
+}
+
+.health-status-dot.partial {
+  background: #f4e79a;
+}
+
+.health-status-dot.unavailable,
+.health-status-dot.error {
+  background: #ffd1bd;
+}
+
+.health-popover {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 20;
+  width: min(720px, calc(100vw - 32px));
+  box-shadow: 0 10px 0 rgba(27, 28, 31, 0.12);
+}
+
 .health-panel {
   margin-bottom: 12px;
+}
+
+.health-popover .health-panel {
+  margin-bottom: 0;
+}
+
+.health-popover .health-list {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .health-list {
@@ -605,6 +648,11 @@ h2 {
     grid-template-columns: 1fr;
   }
 
+  .health-popover {
+    right: -48px;
+    width: min(560px, calc(100vw - 24px));
+  }
+
   .add-form {
     flex-wrap: wrap;
   }
@@ -630,6 +678,21 @@ h2 {
   .topbar {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .topbar-actions {
+    width: 100%;
+    flex-wrap: wrap;
+  }
+
+  .health-popover {
+    right: auto;
+    left: 0;
+    width: calc(100vw - 18px);
+  }
+
+  .health-popover .health-list {
+    grid-template-columns: 1fr;
   }
 
   .add-form label,
