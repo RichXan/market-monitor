@@ -709,7 +709,9 @@ function WatchlistPanel({
                   <small className={movement}>{quoteStatusText(quote)}</small>
                   <small>{item.symbol}</small>
                 </div>
-                <QuoteSparkline quote={quote} symbol={item.symbol} />
+                <div className="compact-quote-chart">
+                  <QuoteSparkline quote={quote} symbol={item.symbol} />
+                </div>
                 <div className="compact-quote-values">
                   <strong className={movement}>{formatPercent(quote?.change_percent)}</strong>
                   <small>{quote ? formatCurrency(quote.price, quote.currency) : "--"}</small>

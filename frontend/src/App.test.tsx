@@ -327,7 +327,9 @@ describe("App", () => {
 
     expect(await screen.findByText("Apple")).toBeInTheDocument();
     expect(screen.queryByRole("table")).not.toBeInTheDocument();
-    expect(screen.getByLabelText("AAPL 行情卡")).toBeInTheDocument();
+    const appleCard = screen.getByLabelText("AAPL 行情卡");
+    expect(appleCard).toBeInTheDocument();
+    expect(appleCard.querySelector(".compact-quote-chart")).toBeInTheDocument();
     expect(screen.getByLabelText("AAPL 日内走势示意")).toBeInTheDocument();
     expect(screen.getAllByText("震荡上涨").length).toBeGreaterThan(0);
     expect(screen.getByText("震荡下跌")).toBeInTheDocument();
