@@ -946,7 +946,10 @@ class MarketDataProvider:
             previous_close = _float(info.get("previousClose"))
             volume = _float(info.get("lastVolume") or info.get("volume"))
             amount = _float(info.get("amount"))
-            if amount is None and price is not None and volume is not None:
+            if item.market == Market.CRYPTO and amount is None:
+                amount = volume
+                volume = round(amount / price, 8) if amount is not None and price not in (None, 0) else None
+            elif amount is None and price is not None and volume is not None:
                 amount = round(price * volume, 2)
             change = None
             change_percent = None

@@ -15,6 +15,7 @@ class FakeTicker:
     def __init__(self, symbol: str) -> None:
         self.symbol = symbol
         currency = "USD"
+        last_volume = 55000000
         if symbol.endswith(".HK"):
             currency = "HKD"
         if symbol.endswith((".SS", ".SZ")):
@@ -33,6 +34,7 @@ class FakeTicker:
         if symbol == "BTC-USD":
             last_price = 65000.0
             previous_close = 64000.0
+            last_volume = 3575000000
         if symbol == "000001.SS":
             last_price = 3100.0
             previous_close = 3080.0
@@ -53,7 +55,7 @@ class FakeTicker:
                 "dayHigh": last_price + 1,
                 "dayLow": last_price - 1,
                 "open": previous_close,
-                "lastVolume": 55000000,
+                "lastVolume": last_volume,
                 "currency": currency,
             }
         )
@@ -409,7 +411,8 @@ def test_provider_normalizes_quotes_from_akshare_and_yfinance():
     assert quotes[3].market == Market.CRYPTO
     assert quotes[3].price == 65000.0
     assert quotes[3].change_percent == 1.56
-    assert quotes[3].amount == 3575000000000
+    assert quotes[3].amount == 3575000000
+    assert quotes[3].volume == 55000
 
 
 def test_provider_normalizes_gold_quote():

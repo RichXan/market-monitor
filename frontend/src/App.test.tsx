@@ -289,6 +289,8 @@ describe("App", () => {
     expect(await screen.findByText("Apple")).toBeInTheDocument();
     expect(screen.getAllByText("今日成交额").length).toBeGreaterThan(0);
     expect(screen.getAllByText("今日成交量").length).toBeGreaterThan(0);
+    expect(screen.getByText("24h成交额 USD")).toBeInTheDocument();
+    expect(screen.getByText("24h成交量 BTC")).toBeInTheDocument();
     expect(screen.getByText("1.23亿")).toBeInTheDocument();
     expect(screen.getByText("765.43万")).toBeInTheDocument();
   });

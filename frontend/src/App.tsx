@@ -164,6 +164,10 @@ function mergeWatchItems(items: WatchItem[], additions: WatchItem[]): WatchItem[
   return merged;
 }
 
+function baseAsset(symbol: string): string {
+  return symbol.split("-")[0] || symbol;
+}
+
 export default function App() {
   const [watchlist, setWatchlist] = useState<WatchItem[]>([]);
   const [quotes, setQuotes] = useState<Quote[]>([]);
@@ -652,6 +656,8 @@ function WatchlistPanel({
           watchlist.map((item) => {
             const quote = quotesById.get(item.id);
             const movement = movementClass(quote?.change_percent);
+            const amountLabel = item.market === "crypto" ? `24h成交额 ${quote?.currency ?? "USD"}` : "今日成交额";
+            const volumeLabel = item.market === "crypto" ? `24h成交量 ${baseAsset(item.symbol)}` : "今日成交量";
             return (
               <div className="quote-row" role="row" key={item.id}>
                 <span className="market-tag">{marketLabels[item.market]}</span>
@@ -666,11 +672,11 @@ function WatchlistPanel({
                 </span>
                 <span className="quote-activity-cell" aria-label={`${item.symbol} 今日成交`}>
                   <span>
-                    <small>今日成交额</small>
+                    <small>{amountLabel}</small>
                     <strong>{formatCompact(quote?.amount)}</strong>
                   </span>
                   <span>
-                    <small>今日成交量</small>
+                    <small>{volumeLabel}</small>
                     <strong>{formatCompact(quote?.volume)}</strong>
                   </span>
                 </span>
