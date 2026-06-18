@@ -66,7 +66,14 @@ class FakeTicker:
             "1810.HK": ("Technology", "Consumer Electronics"),
         }
         sector, industry = hk_info.get(symbol, ("Technology", "Software - Application"))
-        self.info = {"sector": sector, "industry": industry, "shortName": symbol}
+        self.info = {
+            "sector": sector,
+            "industry": industry,
+            "shortName": symbol,
+            "averageVolume": 50_000_000,
+            "trailingPE": 29.48,
+            "marketCap": 3_200_000_000_000,
+        }
 
 
 class FakeSearch:
@@ -170,6 +177,9 @@ class FakeAKShare:
                     "昨收": 1488.5,
                     "成交量": 1200000,
                     "成交额": 1800000000,
+                    "量比": 1.12,
+                    "市盈率-动态": 24.2,
+                    "总市值": 1800000000000,
                 }
             ]
         )
@@ -189,6 +199,9 @@ class FakeAKShare:
                     "昨收": 412.6,
                     "成交量": 22000000,
                     "成交额": 9020000000,
+                    "量比": 0.96,
+                    "市盈率": 18.7,
+                    "总市值": 3900000000000,
                 }
             ]
         )
@@ -400,13 +413,22 @@ def test_provider_normalizes_quotes_from_akshare_and_yfinance():
     assert quotes[0].name == "贵州茅台"
     assert quotes[0].price == 1500.5
     assert quotes[0].currency == "CNY"
+    assert quotes[0].volume_ratio == 1.12
+    assert quotes[0].pe_ratio == 24.2
+    assert quotes[0].market_cap == 1800000000000
     assert quotes[1].change_percent == -0.58
     assert quotes[1].currency == "HKD"
+    assert quotes[1].volume_ratio == 0.96
+    assert quotes[1].pe_ratio == 18.7
+    assert quotes[1].market_cap == 3900000000000
     assert quotes[2].price == 192.4
     assert quotes[2].change == 2.4
     assert quotes[2].change_percent == 1.26
     assert quotes[2].volume == 55000000
     assert quotes[2].amount == 10582000000
+    assert quotes[2].volume_ratio == 1.1
+    assert quotes[2].pe_ratio == 29.48
+    assert quotes[2].market_cap == 3200000000000
     assert quotes[2].currency == "USD"
     assert quotes[3].market == Market.CRYPTO
     assert quotes[3].price == 65000.0

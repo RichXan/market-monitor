@@ -114,6 +114,13 @@ function formatCompact(value?: number | null): string {
   }).format(value);
 }
 
+function formatMetricNumber(value?: number | null): string {
+  if (value === null || value === undefined || Number.isNaN(value)) return "--";
+  return Intl.NumberFormat("zh-CN", {
+    maximumFractionDigits: 2
+  }).format(value);
+}
+
 function formatTime(value?: string | null): string {
   if (!value) return "--";
   const parsed = new Date(value);
@@ -710,12 +717,32 @@ function WatchlistPanel({
                 <button className="icon-button ghost compact-delete-button" onClick={() => onDelete(item.id)} title={`删除 ${item.symbol}`} aria-label={`删除 ${item.symbol}`}>
                   <Trash2 aria-hidden="true" size={16} />
                 </button>
+                <QuoteMetrics quote={quote} symbol={item.symbol} />
               </article>
             );
           })
         )}
       </div>
     </section>
+  );
+}
+
+function QuoteMetrics({ quote, symbol }: { quote?: Quote; symbol: string }) {
+  const metrics = [
+    { label: "成交额", value: formatCompact(quote?.amount) },
+    { label: "量比", value: formatMetricNumber(quote?.volume_ratio) },
+    { label: "市盈率", value: formatMetricNumber(quote?.pe_ratio) },
+    { label: "总市值", value: formatCompact(quote?.market_cap) }
+  ];
+  return (
+    <div className="compact-quote-metrics" aria-label={`${symbol} 行情指标`}>
+      {metrics.map((metric) => (
+        <span className="compact-quote-metric" key={metric.label}>
+          <small>{metric.label}</small>
+          <strong>{metric.value}</strong>
+        </span>
+      ))}
+    </div>
   );
 }
 

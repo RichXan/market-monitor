@@ -473,7 +473,7 @@ h2 {
   grid-template-columns: minmax(132px, 1fr) minmax(92px, 0.62fr) minmax(74px, auto) 30px;
   align-items: center;
   gap: 9px;
-  min-height: 48px;
+  min-height: 76px;
   padding: 7px 7px 7px 10px;
   border: 1px solid transparent;
   border-radius: 6px;
@@ -574,7 +574,41 @@ h2 {
   white-space: nowrap;
 }
 
+.compact-quote-metrics {
+  grid-column: 1 / 4;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+  padding-top: 6px;
+  border-top: 1px solid rgba(98, 97, 93, 0.22);
+  min-width: 0;
+}
+
+.compact-quote-metric {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+
+.compact-quote-metric small {
+  color: #62615d;
+  font-size: 0.66rem;
+  line-height: 1.1;
+  white-space: nowrap;
+}
+
+.compact-quote-metric strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.78rem;
+  line-height: 1.15;
+}
+
 .compact-delete-button {
+  grid-column: 4;
+  grid-row: 1 / span 2;
+  justify-self: center;
   opacity: 0.42;
 }
 
@@ -786,5 +820,15 @@ h2 {
     height: 28px;
     padding-top: 2px;
     border-top: 1px dashed #d3d0c6;
+  }
+
+  .compact-quote-metrics {
+    grid-column: 1 / -1;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .compact-delete-button {
+    grid-column: 3;
+    grid-row: 1;
   }
 }

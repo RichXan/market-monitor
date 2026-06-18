@@ -63,6 +63,9 @@ const quotes: Quote[] = [
     previous_close: 190,
     volume: 7654321,
     amount: 123456789,
+    volume_ratio: 1.37,
+    pe_ratio: 29.48,
+    market_cap: 3200000000000,
     currency: "USD",
     status: { status: "ok", source: "yfinance", updated_at: "2026-06-17T00:00:00+00:00" }
   },
@@ -80,6 +83,9 @@ const quotes: Quote[] = [
     previous_close: 1488.5,
     volume: 1200000,
     amount: 1800000000,
+    volume_ratio: 1.12,
+    pe_ratio: 24.2,
+    market_cap: 1800000000000,
     currency: "CNY",
     status: { status: "ok", source: "AKShare", updated_at: "2026-06-17T00:00:00+00:00" }
   },
@@ -97,6 +103,7 @@ const quotes: Quote[] = [
     previous_close: 64000,
     volume: 32000,
     amount: 2080000000,
+    market_cap: 1280000000000,
     currency: "USD",
     status: { status: "ok", source: "yfinance / Yahoo Finance crypto", updated_at: "2026-06-17T00:00:00+00:00" }
   },
@@ -114,6 +121,7 @@ const quotes: Quote[] = [
     previous_close: 3550,
     volume: 580000,
     amount: 2030000000,
+    market_cap: 420000000000,
     currency: "USD",
     status: { status: "ok", source: "yfinance / Yahoo Finance crypto", updated_at: "2026-06-17T00:00:00+00:00" }
   }
@@ -326,6 +334,21 @@ describe("App", () => {
     expect(screen.getByText("+1.26%")).toBeInTheDocument();
     expect(screen.getAllByText("-1.41%").length).toBeGreaterThan(0);
     expect(screen.getAllByText("$65,000.00").length).toBeGreaterThan(0);
+  });
+
+  it("renders quote card activity and valuation metrics", async () => {
+    render(<App />);
+
+    const appleCard = await screen.findByLabelText("AAPL 行情卡");
+
+    expect(within(appleCard).getByText("成交额")).toBeInTheDocument();
+    expect(within(appleCard).getByText("1.23亿")).toBeInTheDocument();
+    expect(within(appleCard).getByText("量比")).toBeInTheDocument();
+    expect(within(appleCard).getByText("1.37")).toBeInTheDocument();
+    expect(within(appleCard).getByText("市盈率")).toBeInTheDocument();
+    expect(within(appleCard).getByText("29.48")).toBeInTheDocument();
+    expect(within(appleCard).getByText("总市值")).toBeInTheDocument();
+    expect(within(appleCard).getByText("3.2万亿")).toBeInTheDocument();
   });
 
   it("loads sector constituents when a sector row is selected", async () => {

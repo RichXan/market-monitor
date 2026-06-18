@@ -763,6 +763,9 @@ class MarketDataProvider:
             previous_close=_float(_first_present(row, ["昨收", "昨收价", "previousClose"])),
             volume=_float(_first_present(row, ["成交量", "volume"])),
             amount=_float(_first_present(row, ["成交额", "amount"])),
+            volume_ratio=_float(_first_present(row, ["量比", "volumeRatio"])),
+            pe_ratio=_float(_first_present(row, ["市盈率-动态", "市盈率", "动态市盈率", "TTM市盈率", "peRatio", "PE"])),
+            market_cap=_float(_first_present(row, ["总市值", "总市值-人民币", "marketCap"])),
             currency=currency,
             status=_status("ok", result.source),
         )
@@ -967,6 +970,30 @@ class MarketDataProvider:
             previous_close = _float(info.get("previousClose"))
             volume = _float(info.get("lastVolume") or info.get("volume"))
             amount = _float(info.get("amount"))
+            detail_info: dict[str, Any] = {}
+            if item.market != Market.CRYPTO:
+                try:
+                    detail_info = getattr(ticker, "info", {}) or {}
+                except Exception:
+                    detail_info = {}
+            average_volume = _float(
+                info.get("tenDayAverageVolume")
+                or info.get("threeMonthAverageVolume")
+                or detail_info.get("averageVolume")
+                or detail_info.get("averageDailyVolume10Day")
+                or detail_info.get("averageVolume10days")
+            )
+            volume_ratio = (
+                round(volume / average_volume, 2)
+                if item.market != Market.CRYPTO and volume is not None and average_volume not in (None, 0)
+                else None
+            )
+            pe_ratio = (
+                _float(detail_info.get("trailingPE") or detail_info.get("forwardPE"))
+                if item.market != Market.CRYPTO
+                else None
+            )
+            market_cap = _float(info.get("marketCap") or info.get("market_cap") or detail_info.get("marketCap"))
             if item.market == Market.CRYPTO and amount is None:
                 amount = volume
                 volume = round(amount / price, 8) if amount is not None and price not in (None, 0) else None
@@ -991,6 +1018,9 @@ class MarketDataProvider:
                 previous_close=previous_close,
                 volume=volume,
                 amount=amount,
+                volume_ratio=volume_ratio,
+                pe_ratio=pe_ratio,
+                market_cap=market_cap,
                 currency=str(info.get("currency") or "USD"),
                 status=_status("ok", source),
             )

@@ -58,6 +58,9 @@ export interface Quote {
   previous_close?: number | null;
   volume?: number | null;
   amount?: number | null;
+  volume_ratio?: number | null;
+  pe_ratio?: number | null;
+  market_cap?: number | null;
   currency: string;
   status: ProviderStatus;
 }

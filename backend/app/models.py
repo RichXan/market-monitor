@@ -78,6 +78,9 @@ class Quote(BaseModel):
     previous_close: float | None = None
     volume: float | None = None
     amount: float | None = None
+    volume_ratio: float | None = None
+    pe_ratio: float | None = None
+    market_cap: float | None = None
     currency: str
     status: ProviderStatus
 
