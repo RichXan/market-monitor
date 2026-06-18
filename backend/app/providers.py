@@ -245,6 +245,16 @@ class MarketDataProvider:
             return self._cached("sectors:hk", self._get_hk_sector_activity)
         if market == Market.US:
             return self._get_us_sector_etfs()
+        if market == Market.CRYPTO:
+            return SectorResponse(
+                market=Market.CRYPTO,
+                items=[],
+                status=_status(
+                    "unavailable",
+                    "crypto sector ranking",
+                    "Crypto sector activity ranking is not configured for the selected free data sources.",
+                ),
+            )
         return self._cached("sectors:a", self._get_a_share_sectors)
 
     def get_sector_details(self, market: Market, sector_name: str, limit: int = 12) -> SectorDetailResponse:
@@ -252,6 +262,17 @@ class MarketDataProvider:
             return self._get_us_sector_details(sector_name, limit)
         if market == Market.HK:
             return self._get_hk_sector_details(sector_name, limit)
+        if market == Market.CRYPTO:
+            return SectorDetailResponse(
+                market=Market.CRYPTO,
+                sector_name=sector_name,
+                items=[],
+                status=_status(
+                    "unavailable",
+                    "crypto sector details",
+                    "Crypto sector constituents are not configured for the selected free data sources.",
+                ),
+            )
         return self._get_a_sector_details(sector_name, limit)
 
     def _get_a_share_sectors(self) -> SectorResponse:

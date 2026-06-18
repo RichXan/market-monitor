@@ -545,6 +545,22 @@ def test_provider_returns_yahoo_hk_sector_activity_and_us_sector_proxies():
     assert us.items[0].change_percent == 5.0
 
 
+def test_provider_does_not_return_a_share_data_for_crypto_sector_endpoints():
+    provider = MarketDataProvider(ak_module=FakeAKShare(), yf_module=FakeYFinance())
+
+    sectors = provider.get_sectors(Market.CRYPTO)
+    details = provider.get_sector_details(Market.CRYPTO, "Layer 1")
+
+    assert sectors.market == Market.CRYPTO
+    assert sectors.status.status == "unavailable"
+    assert sectors.items == []
+    assert "not configured" in (sectors.status.message or "")
+    assert details.market == Market.CRYPTO
+    assert details.status.status == "unavailable"
+    assert details.items == []
+    assert "not configured" in (details.status.message or "")
+
+
 def test_provider_returns_sector_details_for_a_hk_and_us():
     provider = MarketDataProvider(ak_module=FakeAKShare(), yf_module=FakeYFinance())
 
