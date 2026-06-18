@@ -391,7 +391,7 @@ def create_app(
             market_provider.get_sector_details(market, sector_name, limit=limit),
         )
 
-    async def refresh_market_cache_once() -> dict[str, int]:
+    async def refresh_market_cache_once() -> tuple[str, str]:
         watchlist = await refresh_call("watchlist", resolved_watchlist)
         initial_results = await asyncio.gather(
             refresh_call("quotes", refresh_quotes_cache, watchlist),
@@ -400,7 +400,11 @@ def create_app(
             *(refresh_call(f"{market.value} sectors", refresh_sector_cache, market) for market in MARKETS),
             return_exceptions=True,
         )
-        errors = [result for result in initial_results if isinstance(result, Exception)]
+        core_errors = [result for result in initial_results if isinstance(result, Exception)]
+        if core_errors:
+            messages = "; ".join(str(error) for error in core_errors[:3])
+            raise RuntimeError(messages)
+
         sector_responses = [result for result in initial_results[3:] if isinstance(result, SectorResponse)]
         detail_limit = max(0, sector_detail_refresh_count)
         detail_tasks = [
@@ -409,17 +413,24 @@ def create_app(
             for item in response.items[:detail_limit]
         ]
         detail_results = await asyncio.gather(*detail_tasks, return_exceptions=True) if detail_tasks else []
-        errors.extend(result for result in detail_results if isinstance(result, Exception))
-        if errors:
-            messages = "; ".join(str(error) for error in errors[:3])
-            raise RuntimeError(messages)
+        detail_errors = [result for result in detail_results if isinstance(result, Exception)]
         index_result = initial_results[1]
-        return {
+        counts = {
             "quotes": len(watchlist),
             "indexes": len(index_result) if isinstance(index_result, list) else 0,
             "sectors": len(sector_responses),
             "sector_details": sum(1 for result in detail_results if not isinstance(result, Exception)),
         }
+        message = (
+            f"Cached {counts['quotes']} quotes, "
+            f"{counts['indexes']} index panels, "
+            f"{counts['sectors']} sector panels, "
+            f"{counts['sector_details']} sector detail panels"
+        )
+        if detail_errors:
+            messages = "; ".join(str(error) for error in detail_errors[:3])
+            return "partial", f"{message}; sector detail preload partial: {messages}"
+        return "ok", message
 
     async def refresh_call(label: str, func: Callable, *args):
         try:
@@ -433,16 +444,11 @@ def create_app(
     async def background_refresh_loop() -> None:
         while True:
             try:
-                counts = await refresh_market_cache_once()
+                status, message = await refresh_market_cache_once()
                 refresh_state.update(
-                    status="ok",
+                    status=status,
                     updated_at=utc_now_iso(),
-                    message=(
-                        f"Cached {counts['quotes']} quotes, "
-                        f"{counts['indexes']} index panels, "
-                        f"{counts['sectors']} sector panels, "
-                        f"{counts['sector_details']} sector detail panels"
-                    ),
+                    message=message,
                 )
             except Exception as exc:
                 refresh_state.update(status="error", updated_at=utc_now_iso(), message=str(exc))

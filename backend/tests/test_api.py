@@ -181,6 +181,12 @@ class SlowSectorProvider(FakeProvider):
         return super().get_sectors(market)
 
 
+class SlowSectorDetailProvider(FakeProvider):
+    def get_sector_details(self, market, sector_name, limit=12):
+        time.sleep(0.2)
+        return super().get_sector_details(market, sector_name, limit=limit)
+
+
 class CountingProvider(FakeProvider):
     def __init__(self) -> None:
         self.quote_calls = 0
@@ -406,6 +412,39 @@ def test_background_refresh_reports_timeout_in_health(tmp_path):
     assert background_service is not None
     assert background_service["status"] == "error"
     assert "timed out" in background_service["message"]
+
+
+def test_background_refresh_reports_partial_when_only_sector_detail_preload_times_out(tmp_path):
+    store = WatchlistStore(tmp_path / "watchlist.json")
+    provider = SlowSectorDetailProvider()
+    cache = FakeJsonCache()
+
+    app = create_app(
+        store=store,
+        provider=provider,
+        cache=cache,
+        background_refresh_seconds=0.5,
+        background_provider_timeout_seconds=0.01,
+    )
+    with TestClient(app) as client:
+        background_service = None
+        deadline = time.time() + 1
+        while time.time() < deadline:
+            response = client.get("/api/health")
+            services = {item["name"]: item for item in response.json()["services"]}
+            background_service = services["Background refresh"]
+            if "timed out" in (background_service.get("message") or ""):
+                break
+            time.sleep(0.02)
+
+    assert background_service is not None
+    assert background_service["status"] == "partial"
+    assert "sector detail" in background_service["message"]
+    assert "timed out" in background_service["message"]
+    assert any(key.startswith("quotes:") for key in cache.values)
+    assert "gold:Au99.99" in cache.values
+    assert "indexes:global" in cache.values
+    assert all(f"sectors:{market.value}" in cache.values for market in [Market.A, Market.HK, Market.US])
 
 
 def test_symbol_search_endpoint(tmp_path):
