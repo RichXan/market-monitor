@@ -1,4 +1,5 @@
 import time
+from threading import Lock
 
 import pandas as pd
 
@@ -16,6 +17,7 @@ class FakeTicker:
         self.symbol = symbol
         currency = "USD"
         last_volume = 55000000
+        market_cap = 3_200_000_000_000
         if symbol.endswith(".HK"):
             currency = "HKD"
         if symbol.endswith((".SS", ".SZ")):
@@ -35,6 +37,7 @@ class FakeTicker:
             last_price = 65000.0
             previous_close = 64000.0
             last_volume = 3575000000
+            market_cap = 1_280_000_000_000
         if symbol == "000001.SS":
             last_price = 3100.0
             previous_close = 3080.0
@@ -72,7 +75,7 @@ class FakeTicker:
             "shortName": symbol,
             "averageVolume": 50_000_000,
             "trailingPE": 29.48,
-            "marketCap": 3_200_000_000_000,
+            "marketCap": market_cap,
         }
 
 
@@ -130,9 +133,38 @@ class FakeYFinance:
         return {"quotes": quotes[:count]}
 
 
+class SlowConcurrentYFinance(FakeYFinance):
+    def __init__(self) -> None:
+        self.active = 0
+        self.max_active = 0
+        self.lock = Lock()
+
+    def Ticker(self, symbol: str) -> FakeTicker:
+        with self.lock:
+            self.active += 1
+            self.max_active = max(self.max_active, self.active)
+        try:
+            time.sleep(0.05)
+            return FakeTicker(symbol)
+        finally:
+            with self.lock:
+                self.active -= 1
+
+
 class FailingYFinance:
     def Ticker(self, symbol: str):
         raise ConnectionError("Yahoo failed")
+
+
+class FakeHttpResponse:
+    def __init__(self, payload: dict) -> None:
+        self.payload = payload
+
+    def raise_for_status(self) -> None:
+        return None
+
+    def json(self) -> dict:
+        return self.payload
 
 
 class FailingGoogleFallbackProvider(MarketDataProvider):
@@ -435,6 +467,9 @@ def test_provider_normalizes_quotes_from_akshare_and_yfinance():
     assert quotes[3].change_percent == 1.56
     assert quotes[3].amount == 3575000000
     assert quotes[3].volume == 55000
+    assert quotes[3].market_cap == 1280000000000
+    assert quotes[3].volume_ratio is None
+    assert quotes[3].pe_ratio is None
 
 
 def test_provider_normalizes_gold_quote():
@@ -565,6 +600,72 @@ def test_provider_returns_yahoo_hk_sector_activity_and_us_sector_proxies():
     assert [item.name for item in us.items[:2]] == ["Technology", "Health Care"]
     assert us.items[-1].name == "Financials"
     assert us.items[0].change_percent == 5.0
+
+
+def test_provider_loads_us_sector_etfs_concurrently():
+    yf = SlowConcurrentYFinance()
+    provider = MarketDataProvider(ak_module=FakeAKShare(), yf_module=yf)
+
+    response = provider.get_sectors(Market.US)
+
+    assert response.status.status == "ok"
+    assert yf.max_active > 1
+
+
+def test_provider_loads_yfinance_watch_quotes_concurrently():
+    yf = SlowConcurrentYFinance()
+    provider = MarketDataProvider(ak_module=FakeAKShare(), yf_module=yf)
+    items = [
+        WatchItem(id="us:AAPL", market=Market.US, symbol="AAPL", name="Apple"),
+        WatchItem(id="us:MSFT", market=Market.US, symbol="MSFT", name="Microsoft"),
+        WatchItem(id="crypto:BTC-USD", market=Market.CRYPTO, symbol="BTC-USD", name="Bitcoin"),
+    ]
+
+    quotes = provider.get_quotes(items)
+
+    assert [quote.symbol for quote in quotes] == ["AAPL", "MSFT", "BTC-USD"]
+    assert yf.max_active > 1
+
+
+def test_provider_falls_back_to_eastmoney_single_quote_when_market_frames_fail(monkeypatch):
+    def fake_get(url, **kwargs):
+        assert "push2.eastmoney.com/api/qt/stock/get" in url
+        assert kwargs["params"]["secid"] == "0.000858"
+        return FakeHttpResponse(
+            {
+                "data": {
+                    "f43": 7585,
+                    "f44": 7736,
+                    "f45": 7585,
+                    "f46": 7728,
+                    "f47": 326843,
+                    "f48": 2499475187.41,
+                    "f57": "000858",
+                    "f58": "五 粮 液",
+                    "f60": 7749,
+                    "f116": 294419967179.25,
+                    "f162": 913,
+                    "f168": 84,
+                    "f170": -212,
+                }
+            }
+        )
+
+    monkeypatch.setattr("app.providers.httpx.get", fake_get)
+    provider = MarketDataProvider(ak_module=FailingAKShare(), yf_module=FailingYFinance())
+    item = WatchItem(id="a:000858", market=Market.A, symbol="000858", name="五粮液")
+
+    quote = provider.get_quotes([item])[0]
+
+    assert quote.status.status == "ok"
+    assert quote.status.source == "Eastmoney single quote fallback"
+    assert quote.name == "五 粮 液"
+    assert quote.price == 75.85
+    assert quote.change_percent == -2.12
+    assert quote.amount == 2499475187.41
+    assert quote.volume_ratio == 0.84
+    assert quote.pe_ratio == 9.13
+    assert quote.market_cap == 294419967179.25
 
 
 def test_provider_does_not_return_a_share_data_for_crypto_sector_endpoints():

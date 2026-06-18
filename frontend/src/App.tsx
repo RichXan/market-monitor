@@ -245,7 +245,6 @@ export default function App() {
     const quotesPromise = fetchQuotes();
     const indexesPromise = fetchIndexes();
     const goldPromise = fetchGold();
-    const healthPromise = fetchHealth();
     const marketStatusesPromise = fetchMarketStatuses();
 
     try {
@@ -255,11 +254,10 @@ export default function App() {
       failures.push("自选列表");
     }
 
-    const [quotesResult, indexesResult, goldResult, healthResult, marketStatusesResult] = await Promise.allSettled([
+    const [quotesResult, indexesResult, goldResult, marketStatusesResult] = await Promise.allSettled([
       quotesPromise,
       indexesPromise,
       goldPromise,
-      healthPromise,
       marketStatusesPromise
     ]);
 
@@ -271,9 +269,6 @@ export default function App() {
 
     if (goldResult.status === "fulfilled") setGold(goldResult.value);
     else failures.push("黄金");
-
-    if (healthResult.status === "fulfilled") setHealth(healthResult.value);
-    else failures.push("接口健康");
 
     if (marketStatusesResult.status === "fulfilled") setMarketStatuses(marketStatusesResult.value);
     else failures.push("交易时段");
@@ -321,6 +316,25 @@ export default function App() {
     });
   }
 
+  async function loadHealth() {
+    try {
+      setHealth(await fetchHealth());
+    } catch (exc) {
+      setHealth({
+        status: "error",
+        services: [
+          {
+            name: "Health",
+            status: "error",
+            source: "本地 API",
+            updated_at: new Date().toISOString(),
+            message: exc instanceof Error ? exc.message : "接口健康加载失败"
+          }
+        ]
+      });
+    }
+  }
+
   useEffect(() => {
     let ignore = false;
     async function load() {
@@ -345,6 +359,11 @@ export default function App() {
       window.clearInterval(timer);
     };
   }, []);
+
+  useEffect(() => {
+    if (!healthMenuOpen) return;
+    loadHealth();
+  }, [healthMenuOpen]);
 
   useEffect(() => {
     const query = form.name?.trim() ?? "";

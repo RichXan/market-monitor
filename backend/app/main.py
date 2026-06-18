@@ -22,7 +22,6 @@ from app.models import (
     Market,
     MarketStatus,
     OverviewResponse,
-    ProviderStatus,
     Quote,
     SectorDetailResponse,
     SectorResponse,
@@ -228,16 +227,6 @@ def aggregate_status(statuses: list[str]) -> str:
     return "ok"
 
 
-def service_from_provider_status(name: str, status: ProviderStatus) -> HealthService:
-    return HealthService(
-        name=name,
-        status=status.status,
-        source=status.source,
-        updated_at=status.updated_at,
-        message=status.message,
-    )
-
-
 def create_app(
     store: WatchlistStore | None = None,
     provider: MarketDataProvider | None = None,
@@ -391,6 +380,76 @@ def create_app(
             market_provider.get_sector_details(market, sector_name, limit=limit),
         )
 
+    def health_service_from_cached_raw(
+        name: str,
+        raw: object | None,
+        model: type[ModelT],
+        empty_message: str,
+    ) -> HealthService:
+        if raw is None:
+            return HealthService(
+                name=name,
+                status="partial",
+                source=type(market_cache).__name__,
+                updated_at=utc_now_iso(),
+                message=empty_message,
+            )
+        try:
+            values = [model.model_validate(item) for item in raw] if isinstance(raw, list) else [model.model_validate(raw)]
+        except Exception as exc:
+            return HealthService(
+                name=name,
+                status="error",
+                source=type(market_cache).__name__,
+                updated_at=utc_now_iso(),
+                message=f"Cached {name.lower()} data is invalid: {exc}",
+            )
+        statuses = [item.status for item in values if hasattr(item, "status")]
+        return HealthService(
+            name=name,
+            status=aggregate_status([status.status for status in statuses]),
+            source=" / ".join(sorted({status.source for status in statuses})) or type(market_cache).__name__,
+            updated_at=max((status.updated_at for status in statuses), default=utc_now_iso()),
+        )
+
+    def quote_health_service() -> HealthService:
+        items = watchlist_store.list_items()
+        return health_service_from_cached_raw(
+            "Quotes",
+            market_cache.get_json(watchlist_cache_key(items)),
+            Quote,
+            "No cached quote data yet. The background refresher or /api/quotes will populate it.",
+        )
+
+    def sectors_health_service() -> HealthService:
+        raws = [market_cache.get_json(f"sectors:{market.value}") for market in MARKETS]
+        missing = [market.value for market, raw in zip(MARKETS, raws) if raw is None]
+        if missing:
+            return HealthService(
+                name="Sectors",
+                status="partial",
+                source=type(market_cache).__name__,
+                updated_at=utc_now_iso(),
+                message=f"No cached sector data yet for: {', '.join(missing)}.",
+            )
+        try:
+            sectors = [SectorResponse.model_validate(raw) for raw in raws]
+        except Exception as exc:
+            return HealthService(
+                name="Sectors",
+                status="error",
+                source=type(market_cache).__name__,
+                updated_at=utc_now_iso(),
+                message=f"Cached sectors data is invalid: {exc}",
+            )
+        statuses = [sector.status for sector in sectors]
+        return HealthService(
+            name="Sectors",
+            status=aggregate_status([status.status for status in statuses]),
+            source=" / ".join(sorted({status.source for status in statuses})) or type(market_cache).__name__,
+            updated_at=max((status.updated_at for status in statuses), default=utc_now_iso()),
+        )
+
     async def refresh_market_cache_once() -> tuple[str, str]:
         watchlist = await refresh_call("watchlist", resolved_watchlist)
         initial_results = await asyncio.gather(
@@ -505,52 +564,24 @@ def create_app(
                 message=refresh_state["message"],
             ),
         ]
-        try:
-            quote_statuses = [quote.status for quote in cached_quotes(resolved_watchlist())]
-            services.append(
-                HealthService(
-                    name="Quotes",
-                    status=aggregate_status([status.status for status in quote_statuses]),
-                    source=" / ".join(sorted({status.source for status in quote_statuses})) or "market provider",
-                    updated_at=max((status.updated_at for status in quote_statuses), default=utc_now_iso()),
-                )
+        services.append(quote_health_service())
+        services.append(
+            health_service_from_cached_raw(
+                "Gold",
+                market_cache.get_json("gold:Au99.99"),
+                GoldQuote,
+                "No cached gold data yet. The background refresher or /api/gold will populate it.",
             )
-        except Exception as exc:
-            services.append(
-                HealthService(name="Quotes", status="error", source="market provider", updated_at=utc_now_iso(), message=str(exc))
+        )
+        services.append(
+            health_service_from_cached_raw(
+                "Indexes",
+                market_cache.get_json("indexes:global"),
+                IndexQuote,
+                "No cached index data yet. The background refresher or /api/indexes will populate it.",
             )
-        try:
-            services.append(service_from_provider_status("Gold", cached_gold().status))
-        except Exception as exc:
-            services.append(HealthService(name="Gold", status="error", source="market provider", updated_at=utc_now_iso(), message=str(exc)))
-        try:
-            index_statuses = [index.status for index in cached_indexes()]
-            services.append(
-                HealthService(
-                    name="Indexes",
-                    status=aggregate_status([status.status for status in index_statuses]),
-                    source=" / ".join(sorted({status.source for status in index_statuses})) or "market provider",
-                    updated_at=max((status.updated_at for status in index_statuses), default=utc_now_iso()),
-                )
-            )
-        except Exception as exc:
-            services.append(
-                HealthService(name="Indexes", status="error", source="market provider", updated_at=utc_now_iso(), message=str(exc))
-            )
-        try:
-            sector_statuses = [cached_sectors(market).status for market in MARKETS]
-            services.append(
-                HealthService(
-                    name="Sectors",
-                    status=aggregate_status([status.status for status in sector_statuses]),
-                    source=" / ".join(sorted({status.source for status in sector_statuses})) or "market provider",
-                    updated_at=max((status.updated_at for status in sector_statuses), default=utc_now_iso()),
-                )
-            )
-        except Exception as exc:
-            services.append(
-                HealthService(name="Sectors", status="error", source="market provider", updated_at=utc_now_iso(), message=str(exc))
-            )
+        )
+        services.append(sectors_health_service())
         return HealthResponse(status="ok", services=services)
 
     @app.get("/api/market-status", response_model=list[MarketStatus])

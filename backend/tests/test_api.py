@@ -237,6 +237,12 @@ def make_client(tmp_path):
 def test_health_endpoint(tmp_path):
     client = make_client(tmp_path)
 
+    assert client.get("/api/quotes").status_code == 200
+    assert client.get("/api/gold").status_code == 200
+    assert client.get("/api/indexes").status_code == 200
+    for market in [Market.A, Market.HK, Market.US]:
+        assert client.get("/api/sectors", params={"market": market.value}).status_code == 200
+
     response = client.get("/api/health")
 
     assert response.status_code == 200
@@ -245,6 +251,20 @@ def test_health_endpoint(tmp_path):
     assert {"FastAPI", "Cache", "Quotes", "Gold", "Indexes", "Sectors"}.issubset(services)
     assert services["Gold"]["source"] == "fake-gold"
     assert services["Indexes"]["source"] == "fake-index"
+
+
+def test_health_endpoint_does_not_cold_start_market_provider(tmp_path):
+    store = WatchlistStore(tmp_path / "watchlist.json")
+    provider = CountingProvider()
+    client = TestClient(create_app(store=store, provider=provider, background_refresh_seconds=0))
+
+    response = client.get("/api/health")
+
+    assert response.status_code == 200
+    assert provider.quote_calls == 0
+    assert provider.gold_calls == 0
+    assert provider.index_calls == 0
+    assert provider.sector_calls == 0
 
 
 def test_market_status_endpoint(tmp_path):

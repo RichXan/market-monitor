@@ -81,6 +81,24 @@ GOOGLE_INDEX_PATHS: dict[Market, str] = {
     Market.US: ".INX:INDEXSP",
 }
 
+EASTMONEY_SINGLE_QUOTE_FIELDS = ",".join(
+    [
+        "f43",
+        "f44",
+        "f45",
+        "f46",
+        "f47",
+        "f48",
+        "f57",
+        "f58",
+        "f60",
+        "f116",
+        "f162",
+        "f168",
+        "f170",
+    ]
+)
+
 
 def _status(
     status: str,
@@ -116,6 +134,15 @@ def _compact_text(value: Any) -> str:
     return "".join(str(value).split())
 
 
+def _eastmoney_scaled(value: Any, divisor: float = 100, zero_is_none: bool = False) -> float | None:
+    parsed = _float(value)
+    if parsed is None or parsed == -1:
+        return None
+    if zero_is_none and parsed == 0:
+        return None
+    return round(parsed / divisor, 4)
+
+
 class MarketDataProvider:
     def __init__(
         self,
@@ -149,25 +176,36 @@ class MarketDataProvider:
         return yf
 
     def get_quotes(self, items: list[WatchItem]) -> list[Quote]:
-        quotes: list[Quote] = []
+        quotes_by_id: dict[str, Quote] = {}
         frames: dict[Market, MarketFrameResult] = {}
         needed_markets = {item.market for item in items if item.market in {Market.A, Market.HK}}
-        if needed_markets:
-            with ThreadPoolExecutor(max_workers=len(needed_markets)) as executor:
-                futures = {executor.submit(self._load_market_frame, market): market for market in needed_markets}
-                for future in as_completed(futures):
-                    frames[futures[future]] = future.result()
+        yfinance_items = [item for item in items if item.market in {Market.US, Market.CRYPTO}]
+        max_workers = max(1, len(needed_markets) + len(items))
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            frame_futures = {executor.submit(self._load_market_frame, market): market for market in needed_markets}
+            quote_futures = {
+                executor.submit(
+                    self._quote_from_yfinance,
+                    item,
+                    None,
+                    "yfinance / Yahoo Finance crypto" if item.market == Market.CRYPTO else "yfinance / Yahoo Finance",
+                ): item
+                for item in yfinance_items
+            }
+            for future in as_completed(frame_futures):
+                frames[frame_futures[future]] = future.result()
+            market_quote_futures = {}
+            for item in items:
+                if item.market == Market.A:
+                    market_quote_futures[executor.submit(self._quote_from_frame, item, frames[Market.A], "CNY")] = item
+                elif item.market == Market.HK:
+                    market_quote_futures[executor.submit(self._quote_from_frame, item, frames[Market.HK], "HKD")] = item
 
-        for item in items:
-            if item.market == Market.US:
-                quotes.append(self._quote_from_yfinance(item))
-            elif item.market == Market.CRYPTO:
-                quotes.append(self._quote_from_yfinance(item, source="yfinance / Yahoo Finance crypto"))
-            elif item.market == Market.A:
-                quotes.append(self._quote_from_frame(item, frames[Market.A], "CNY"))
-            elif item.market == Market.HK:
-                quotes.append(self._quote_from_frame(item, frames[Market.HK], "HKD"))
-        return quotes
+            all_quote_futures = {**quote_futures, **market_quote_futures}
+            for future in as_completed(all_quote_futures):
+                item = all_quote_futures[future]
+                quotes_by_id[item.id] = future.result()
+        return [quotes_by_id[item.id] for item in items if item.id in quotes_by_id]
 
     def get_index_quotes(self) -> list[IndexQuote]:
         quotes: list[IndexQuote] = []
@@ -548,28 +586,32 @@ class MarketDataProvider:
     def _get_us_sector_etfs(self) -> SectorResponse:
         items: list[SectorItem] = []
         errors: list[str] = []
-        for name, symbol in US_SECTOR_ETFS:
-            try:
-                ticker = self.yf.Ticker(symbol)
-                info = ticker.fast_info
-                price = _float(info.get("lastPrice"))
-                previous_close = _float(info.get("previousClose"))
-                change = None
-                change_percent = None
-                if price is not None and previous_close not in (None, 0):
-                    change = round(price - previous_close, 2)
-                    change_percent = round((change / previous_close) * 100, 2)
-                items.append(
-                    SectorItem(
-                        name=name,
-                        price=price,
-                        change=change,
-                        change_percent=change_percent,
-                        volume=_float(info.get("lastVolume") or info.get("volume")),
-                    )
-                )
-            except Exception as exc:
-                errors.append(f"{symbol}: {exc}")
+        def load_sector_etf(name: str, symbol: str) -> SectorItem:
+            ticker = self.yf.Ticker(symbol)
+            info = ticker.fast_info
+            price = _float(info.get("lastPrice"))
+            previous_close = _float(info.get("previousClose"))
+            change = None
+            change_percent = None
+            if price is not None and previous_close not in (None, 0):
+                change = round(price - previous_close, 2)
+                change_percent = round((change / previous_close) * 100, 2)
+            return SectorItem(
+                name=name,
+                price=price,
+                change=change,
+                change_percent=change_percent,
+                volume=_float(info.get("lastVolume") or info.get("volume")),
+            )
+
+        with ThreadPoolExecutor(max_workers=min(8, len(US_SECTOR_ETFS))) as executor:
+            futures = {executor.submit(load_sector_etf, name, symbol): symbol for name, symbol in US_SECTOR_ETFS}
+            for future in as_completed(futures):
+                symbol = futures[future]
+                try:
+                    items.append(future.result())
+                except Exception as exc:
+                    errors.append(f"{symbol}: {exc}")
 
         items = [item for item in items if item.change_percent is not None]
         items.sort(key=lambda item: item.change_percent if item.change_percent is not None else -9999, reverse=True)
@@ -723,16 +765,24 @@ class MarketDataProvider:
         currency: str,
     ) -> Quote:
         if result.error is not None:
+            eastmoney = self._quote_from_eastmoney_single_quote(item, currency)
+            if eastmoney is not None and eastmoney.status.status == "ok":
+                return eastmoney
             fallback = self._quote_from_yahoo_fallback(item)
-            if fallback is not None and fallback.status.status == "ok":
+            if fallback is not None:
+                self._append_quote_status_message(fallback, str(result.error))
                 return fallback
             return self._unavailable_quote(item, currency, result.source, str(result.error), "error")
 
         frame = result.frame.copy() if result.frame is not None else pd.DataFrame()
         code_column = self._code_column(frame)
         if frame.empty or code_column is None:
+            eastmoney = self._quote_from_eastmoney_single_quote(item, currency)
+            if eastmoney is not None and eastmoney.status.status == "ok":
+                return eastmoney
             fallback = self._quote_from_yahoo_fallback(item)
-            if fallback is not None and fallback.status.status == "ok":
+            if fallback is not None:
+                self._append_quote_status_message(fallback, "No quote rows returned.")
                 return fallback
             return self._unavailable_quote(item, currency, result.source, "No quote rows returned.")
 
@@ -742,8 +792,12 @@ class MarketDataProvider:
             codes = codes.str.zfill(5)
         matched = frame[codes == wanted]
         if matched.empty:
+            eastmoney = self._quote_from_eastmoney_single_quote(item, currency)
+            if eastmoney is not None and eastmoney.status.status == "ok":
+                return eastmoney
             fallback = self._quote_from_yahoo_fallback(item)
-            if fallback is not None and fallback.status.status == "ok":
+            if fallback is not None:
+                self._append_quote_status_message(fallback, f"No quote row found for {wanted}.")
                 return fallback
             return self._unavailable_quote(item, currency, result.source, f"No quote row found for {wanted}.")
 
@@ -769,6 +823,12 @@ class MarketDataProvider:
             currency=currency,
             status=_status("ok", result.source),
         )
+
+    def _append_quote_status_message(self, quote: Quote, prior_message: str) -> None:
+        if quote.status.status == "ok":
+            return
+        current_message = quote.status.message or ""
+        quote.status.message = f"{prior_message}; fallback: {current_message}" if current_message else prior_message
 
     def _code_column(self, frame: pd.DataFrame) -> str | None:
         for column in ["代码", "symbol", "code", "股票代码"]:
@@ -971,11 +1031,10 @@ class MarketDataProvider:
             volume = _float(info.get("lastVolume") or info.get("volume"))
             amount = _float(info.get("amount"))
             detail_info: dict[str, Any] = {}
-            if item.market != Market.CRYPTO:
-                try:
-                    detail_info = getattr(ticker, "info", {}) or {}
-                except Exception:
-                    detail_info = {}
+            try:
+                detail_info = getattr(ticker, "info", {}) or {}
+            except Exception:
+                detail_info = {}
             average_volume = _float(
                 info.get("tenDayAverageVolume")
                 or info.get("threeMonthAverageVolume")
@@ -1192,6 +1251,63 @@ class MarketDataProvider:
             ticker_symbol=ticker_symbol,
             source="yfinance / Yahoo Finance fallback",
         )
+
+    def _quote_from_eastmoney_single_quote(self, item: WatchItem, currency: str) -> Quote | None:
+        secid = self._eastmoney_secid(item)
+        if secid is None:
+            return None
+        try:
+            response = httpx.get(
+                "https://push2.eastmoney.com/api/qt/stock/get",
+                params={"secid": secid, "fields": EASTMONEY_SINGLE_QUOTE_FIELDS},
+                headers={
+                    "Referer": "https://quote.eastmoney.com/",
+                    "User-Agent": (
+                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36"
+                    ),
+                },
+                timeout=max(self.call_timeout_seconds, 4),
+                follow_redirects=True,
+            )
+            response.raise_for_status()
+            data = response.json().get("data")
+            if not isinstance(data, dict):
+                return None
+            price = _eastmoney_scaled(data.get("f43"))
+            previous_close = _eastmoney_scaled(data.get("f60"))
+            change = round(price - previous_close, 4) if price is not None and previous_close is not None else None
+            return Quote(
+                id=item.id,
+                market=item.market,
+                symbol=item.symbol,
+                name=str(data.get("f58") or item.name or item.symbol),
+                price=price,
+                change=change,
+                change_percent=_eastmoney_scaled(data.get("f170")),
+                open=_eastmoney_scaled(data.get("f46")),
+                high=_eastmoney_scaled(data.get("f44")),
+                low=_eastmoney_scaled(data.get("f45")),
+                previous_close=previous_close,
+                volume=_float(data.get("f47")),
+                amount=_float(data.get("f48")),
+                volume_ratio=_eastmoney_scaled(data.get("f168")),
+                pe_ratio=_eastmoney_scaled(data.get("f162"), zero_is_none=True),
+                market_cap=_float(data.get("f116")),
+                currency=currency,
+                status=_status("ok", "Eastmoney single quote fallback"),
+            )
+        except Exception:
+            return None
+
+    def _eastmoney_secid(self, item: WatchItem) -> str | None:
+        symbol = normalize_symbol_for_market(item.market, item.symbol)
+        if item.market == Market.A and symbol.isdigit() and len(symbol) == 6:
+            market_id = "1" if symbol.startswith("6") else "0"
+            return f"{market_id}.{symbol}"
+        if item.market == Market.HK and symbol.isdigit():
+            return f"116.{symbol.zfill(5)}"
+        return None
 
     def _yahoo_symbol_for_market(self, item: WatchItem) -> str | None:
         symbol = normalize_symbol_for_market(item.market, item.symbol)

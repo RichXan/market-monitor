@@ -310,13 +310,14 @@ describe("App", () => {
 
     expect(await screen.findByText("Apple")).toBeInTheDocument();
     expect(screen.queryByRole("region", { name: "接口健康" })).not.toBeInTheDocument();
+    expect(fetchHealth).not.toHaveBeenCalled();
 
     const healthButton = screen.getByRole("button", { name: "接口健康" });
     await user.click(healthButton);
 
     expect(screen.getByRole("region", { name: "接口健康" })).toBeInTheDocument();
-    expect(screen.getByText("Cache")).toBeInTheDocument();
-    expect(screen.getByText("部分板块成分刷新超时")).toBeInTheDocument();
+    expect(await screen.findByText("Cache")).toBeInTheDocument();
+    expect(await screen.findByText("部分板块成分刷新超时")).toBeInTheDocument();
 
     await user.click(healthButton);
     expect(screen.queryByRole("region", { name: "接口健康" })).not.toBeInTheDocument();
