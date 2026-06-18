@@ -31,9 +31,9 @@ import type {
 } from "./types";
 import "./styles.css";
 
-const quoteMarkets: Market[] = ["a", "hk", "us", "crypto"];
 const indexMarkets: Market[] = ["a", "hk", "us"];
 const sectorMarkets: Market[] = ["a", "hk", "us"];
+const cryptoSummarySymbols = ["BTC-USD", "ETH-USD"];
 
 const marketLabels: Record<Market, string> = {
   a: "A股",
@@ -424,22 +424,7 @@ export default function App() {
             status={marketStatusByMarket.get(market)}
           />
         ))}
-        {quoteMarkets.filter((market) => market === "crypto").map((market) => {
-          const marketItems = watchlist.filter((item) => item.market === market);
-          const quoted = marketItems.filter((item) => {
-            const quote = quotesById.get(item.id);
-            return quote?.status.status === "ok" && quote.price !== null && quote.price !== undefined;
-          }).length;
-          return (
-            <div key={market}>
-              <span className="strip-label">{marketLabels[market]}</span>
-              <strong>{marketStatusByMarket.get(market)?.label ?? "状态读取中"}</strong>
-              <small>自选 {marketItems.length}</small>
-              <small>已报价 {quoted}/{marketItems.length}</small>
-              <small>{marketStatusByMarket.get(market)?.session ?? marketHint[market]}</small>
-            </div>
-          );
-        })}
+        <CryptoSummaryCard quotes={quotes} status={marketStatusByMarket.get("crypto")} />
       </section>
 
       <section className="toolbar" aria-label="自选管理">
@@ -527,6 +512,33 @@ export default function App() {
         />
       </section>
     </main>
+  );
+}
+
+function CryptoSummaryCard({ quotes, status }: { quotes: Quote[]; status?: MarketStatus }) {
+  const cryptoQuotes = cryptoSummarySymbols.map((symbol) => {
+    const quote = quotes.find((item) => item.market === "crypto" && item.symbol.toUpperCase() === symbol);
+    return { symbol, quote };
+  });
+  const updatedAt = cryptoQuotes.find((item) => item.quote?.status.updated_at)?.quote?.status.updated_at;
+
+  return (
+    <div className="crypto-summary-card" aria-label="加密货币实时价格">
+      <span className="strip-label">{marketLabels.crypto}</span>
+      <strong className="crypto-session">{status?.label ?? "24/7"}</strong>
+      <div className="crypto-price-list">
+        {cryptoQuotes.map(({ symbol, quote }) => (
+          <div className="crypto-price-row" key={symbol}>
+            <span className="crypto-symbol">{baseAsset(symbol)}</span>
+            <strong className="crypto-price">{formatCurrency(quote?.price, quote?.currency ?? "USD")}</strong>
+            <span className={movementClass(quote?.change_percent)}>{formatPercent(quote?.change_percent)}</span>
+          </div>
+        ))}
+      </div>
+      <small>
+        {status?.session ?? "24/7"} · 更新 {formatTime(updatedAt)}
+      </small>
+    </div>
   );
 }
 

@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
@@ -44,7 +44,8 @@ vi.mock("./api", () => ({
 const watchlist: WatchItem[] = [
   { id: "us:AAPL", market: "us", symbol: "AAPL", name: "Apple" },
   { id: "a:600519", market: "a", symbol: "600519", name: "贵州茅台" },
-  { id: "crypto:BTC-USD", market: "crypto", symbol: "BTC-USD", name: "Bitcoin" }
+  { id: "crypto:BTC-USD", market: "crypto", symbol: "BTC-USD", name: "Bitcoin" },
+  { id: "crypto:ETH-USD", market: "crypto", symbol: "ETH-USD", name: "Ethereum" }
 ];
 
 const quotes: Quote[] = [
@@ -96,6 +97,23 @@ const quotes: Quote[] = [
     previous_close: 64000,
     volume: 32000,
     amount: 2080000000,
+    currency: "USD",
+    status: { status: "ok", source: "yfinance / Yahoo Finance crypto", updated_at: "2026-06-17T00:00:00+00:00" }
+  },
+  {
+    id: "crypto:ETH-USD",
+    market: "crypto",
+    symbol: "ETH-USD",
+    name: "Ethereum",
+    price: 3500,
+    change: -50,
+    change_percent: -1.41,
+    open: 3560,
+    high: 3600,
+    low: 3450,
+    previous_close: 3550,
+    volume: 580000,
+    amount: 2030000000,
     currency: "USD",
     status: { status: "ok", source: "yfinance / Yahoo Finance crypto", updated_at: "2026-06-17T00:00:00+00:00" }
   }
@@ -247,7 +265,8 @@ describe("App", () => {
     expect(await screen.findByText("Apple")).toBeInTheDocument();
     expect(screen.getByText("$192.40")).toBeInTheDocument();
     expect(screen.getByText("Bitcoin")).toBeInTheDocument();
-    expect(screen.getByText("$65,000.00")).toBeInTheDocument();
+    expect(screen.getAllByText("$65,000.00").length).toBeGreaterThan(0);
+    expect(screen.getByText("Ethereum")).toBeInTheDocument();
     expect(screen.getAllByText("加密货币").length).toBeGreaterThan(0);
     expect(screen.getByText("上海金 Au99.99")).toBeInTheDocument();
     expect(screen.getByText("上证指数")).toBeInTheDocument();
@@ -256,13 +275,25 @@ describe("App", () => {
     expect(screen.getByText("¥3,100.00")).toBeInTheDocument();
     expect(screen.getByText("HK$18,000.00")).toBeInTheDocument();
     expect(screen.getByText("$4,900.00")).toBeInTheDocument();
-    expect(screen.getAllByText("自选 1")).toHaveLength(1);
-    expect(screen.getAllByText("已报价 1/1")).toHaveLength(1);
     expect(screen.getByText("暂无板块排行")).toBeInTheDocument();
     expect(screen.getByText("Technology")).toBeInTheDocument();
     expect(screen.getByText(/交易中/)).toBeInTheDocument();
     expect(screen.getAllByText("更新").length).toBeGreaterThan(0);
     expect(screen.getByLabelText("日内区间 AAPL")).toBeInTheDocument();
+  });
+
+  it("shows BTC and ETH live prices in the crypto summary card", async () => {
+    render(<App />);
+
+    const cryptoCard = await screen.findByLabelText("加密货币实时价格");
+
+    expect(within(cryptoCard).getByText("BTC")).toBeInTheDocument();
+    expect(within(cryptoCard).getByText("$65,000.00")).toBeInTheDocument();
+    expect(within(cryptoCard).getByText("+1.56%")).toBeInTheDocument();
+    expect(within(cryptoCard).getByText("ETH")).toBeInTheDocument();
+    expect(within(cryptoCard).getByText("$3,500.00")).toBeInTheDocument();
+    expect(within(cryptoCard).getByText("-1.41%")).toBeInTheDocument();
+    expect(within(cryptoCard).queryByText(/自选/)).not.toBeInTheDocument();
   });
 
   it("keeps interface health in a topbar menu until requested", async () => {
@@ -289,8 +320,9 @@ describe("App", () => {
     expect(await screen.findByText("Apple")).toBeInTheDocument();
     expect(screen.getAllByText("今日成交额").length).toBeGreaterThan(0);
     expect(screen.getAllByText("今日成交量").length).toBeGreaterThan(0);
-    expect(screen.getByText("24h成交额 USD")).toBeInTheDocument();
+    expect(screen.getAllByText("24h成交额 USD").length).toBeGreaterThan(0);
     expect(screen.getByText("24h成交量 BTC")).toBeInTheDocument();
+    expect(screen.getByText("24h成交量 ETH")).toBeInTheDocument();
     expect(screen.getByText("1.23亿")).toBeInTheDocument();
     expect(screen.getByText("765.43万")).toBeInTheDocument();
   });

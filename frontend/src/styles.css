@@ -145,6 +145,7 @@ h2 {
 .market-strip {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
+  align-items: stretch;
   gap: 10px;
   margin-bottom: 12px;
 }
@@ -159,7 +160,10 @@ h2 {
 
 .market-strip > div {
   padding: 12px;
-  min-height: 82px;
+  min-height: 128px;
+  display: grid;
+  align-content: start;
+  gap: 4px;
 }
 
 .strip-label,
@@ -178,13 +182,14 @@ h2 {
 .market-strip strong {
   display: block;
   font-size: 1.25rem;
-  margin: 6px 0;
+  line-height: 1.15;
+  margin: 0;
 }
 
 .market-strip .index-name {
   font-size: 1.02rem;
   line-height: 1.15;
-  margin: 6px 0 3px;
+  margin: 0;
 }
 
 .index-price {
@@ -192,11 +197,45 @@ h2 {
   font-size: 1.16rem;
   font-weight: 900;
   line-height: 1.15;
-  margin-bottom: 3px;
 }
 
 .index-change {
   font-weight: 800;
+}
+
+.crypto-summary-card {
+  min-width: 0;
+}
+
+.crypto-session {
+  font-size: 1.02rem;
+}
+
+.crypto-price-list {
+  display: grid;
+  gap: 5px;
+  margin-top: 2px;
+}
+
+.crypto-price-row {
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr) auto;
+  gap: 7px;
+  align-items: baseline;
+  min-width: 0;
+}
+
+.crypto-symbol {
+  font-size: 0.76rem;
+  font-weight: 900;
+  color: #62615d;
+}
+
+.market-strip .crypto-price {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.98rem;
 }
 
 .toolbar {
