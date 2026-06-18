@@ -62,6 +62,22 @@ export interface Quote {
   status: ProviderStatus;
 }
 
+export interface IndexQuote {
+  market: Market;
+  symbol: string;
+  name: string;
+  price?: number | null;
+  change?: number | null;
+  change_percent?: number | null;
+  open?: number | null;
+  high?: number | null;
+  low?: number | null;
+  previous_close?: number | null;
+  volume?: number | null;
+  currency: string;
+  status: ProviderStatus;
+}
+
 export interface GoldQuote {
   symbol: string;
   name: string;

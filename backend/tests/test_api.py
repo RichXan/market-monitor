@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 from app.main import create_app
 from app.models import (
     GoldQuote,
+    IndexQuote,
     Market,
     ProviderStatus,
     Quote,
@@ -77,8 +78,54 @@ class FakeProvider:
                 status="ok",
                 source="fake-gold",
                 updated_at="2026-06-17T00:00:00+00:00",
+                ),
+            )
+
+    def get_index_quotes(self):
+        return [
+            IndexQuote(
+                market=Market.A,
+                symbol="000001.SS",
+                name="上证指数",
+                price=3100.0,
+                change=12.0,
+                change_percent=0.39,
+                currency="CNY",
+                status=ProviderStatus(
+                    status="ok",
+                    source="fake-index",
+                    updated_at="2026-06-17T00:00:00+00:00",
+                ),
             ),
-        )
+            IndexQuote(
+                market=Market.HK,
+                symbol="^HSI",
+                name="恒生指数",
+                price=18000.0,
+                change=-80.0,
+                change_percent=-0.44,
+                currency="HKD",
+                status=ProviderStatus(
+                    status="ok",
+                    source="fake-index",
+                    updated_at="2026-06-17T00:00:00+00:00",
+                ),
+            ),
+            IndexQuote(
+                market=Market.US,
+                symbol="^GSPC",
+                name="标普500",
+                price=4900.0,
+                change=20.0,
+                change_percent=0.41,
+                currency="USD",
+                status=ProviderStatus(
+                    status="ok",
+                    source="fake-index",
+                    updated_at="2026-06-17T00:00:00+00:00",
+                ),
+            ),
+        ]
 
     def get_sectors(self, market):
         return SectorResponse(
@@ -138,6 +185,7 @@ class CountingProvider(FakeProvider):
     def __init__(self) -> None:
         self.quote_calls = 0
         self.gold_calls = 0
+        self.index_calls = 0
         self.sector_calls = 0
         self.sector_detail_calls = 0
 
@@ -148,6 +196,10 @@ class CountingProvider(FakeProvider):
     def get_gold_quote(self):
         self.gold_calls += 1
         return super().get_gold_quote()
+
+    def get_index_quotes(self):
+        self.index_calls += 1
+        return super().get_index_quotes()
 
     def get_sectors(self, market):
         self.sector_calls += 1
@@ -184,8 +236,9 @@ def test_health_endpoint(tmp_path):
     assert response.status_code == 200
     assert response.json()["status"] == "ok"
     services = {item["name"]: item for item in response.json()["services"]}
-    assert {"FastAPI", "Cache", "Quotes", "Gold", "Sectors"}.issubset(services)
+    assert {"FastAPI", "Cache", "Quotes", "Gold", "Indexes", "Sectors"}.issubset(services)
     assert services["Gold"]["source"] == "fake-gold"
+    assert services["Indexes"]["source"] == "fake-index"
 
 
 def test_market_status_endpoint(tmp_path):
@@ -252,12 +305,15 @@ def test_quote_gold_sector_and_overview_endpoints(tmp_path):
     client = make_client(tmp_path)
 
     quotes = client.get("/api/quotes")
+    indexes = client.get("/api/indexes")
     gold = client.get("/api/gold")
     sectors = client.get("/api/sectors", params={"market": "us"})
     overview = client.get("/api/overview")
 
     assert quotes.status_code == 200
     assert quotes.json()[0]["price"] == 1500.0
+    assert indexes.status_code == 200
+    assert [item["name"] for item in indexes.json()] == ["上证指数", "恒生指数", "标普500"]
     assert gold.json()["symbol"] == "Au99.99"
     assert sectors.json()["status"]["status"] == "unavailable"
     assert set(overview.json()) == {"watchlist", "quotes", "gold", "sectors"}
@@ -302,18 +358,21 @@ def test_background_refresh_preloads_json_cache(tmp_path):
         while time.time() < deadline:
             has_quotes = any(key.startswith("quotes:") for key in cache.values)
             has_gold = "gold:Au99.99" in cache.values
+            has_indexes = "indexes:global" in cache.values
             has_sectors = all(f"sectors:{market.value}" in cache.values for market in [Market.A, Market.HK, Market.US])
             has_details = any(key.startswith("sector-details:") for key in cache.values)
-            if has_quotes and has_gold and has_sectors and has_details:
+            if has_quotes and has_gold and has_indexes and has_sectors and has_details:
                 break
             time.sleep(0.02)
 
     assert provider.quote_calls >= 1
     assert provider.gold_calls >= 1
+    assert provider.index_calls >= 1
     assert provider.sector_calls >= 3
     assert provider.sector_detail_calls >= 1
     assert any(key.startswith("quotes:") for key in cache.values)
     assert "gold:Au99.99" in cache.values
+    assert "indexes:global" in cache.values
     assert all(f"sectors:{market.value}" in cache.values for market in [Market.A, Market.HK, Market.US])
     assert any(key.startswith("sector-details:") for key in cache.values)
 

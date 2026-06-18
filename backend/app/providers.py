@@ -1,13 +1,17 @@
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout, as_completed
 from dataclasses import dataclass
 from functools import cached_property
+import html
+import re
 from time import monotonic
 from typing import Any, Callable, Iterable
 
+import httpx
 import pandas as pd
 
 from app.models import (
     GoldQuote,
+    IndexQuote,
     Market,
     ProviderStatus,
     Quote,
@@ -66,6 +70,16 @@ CRYPTO_SYMBOLS: list[tuple[str, str]] = [
     ("DOGE-USD", "Dogecoin"),
     ("ADA-USD", "Cardano"),
 ]
+
+INDEX_QUOTES: list[tuple[Market, str, str, str]] = [
+    (Market.A, "000001.SS", "上证指数", "CNY"),
+    (Market.HK, "^HSI", "恒生指数", "HKD"),
+    (Market.US, "^GSPC", "标普500", "USD"),
+]
+
+GOOGLE_INDEX_PATHS: dict[Market, str] = {
+    Market.US: ".INX:INDEXSP",
+}
 
 
 def _status(
@@ -153,6 +167,29 @@ class MarketDataProvider:
                 quotes.append(self._quote_from_frame(item, frames[Market.A], "CNY"))
             elif item.market == Market.HK:
                 quotes.append(self._quote_from_frame(item, frames[Market.HK], "HKD"))
+        return quotes
+
+    def get_index_quotes(self) -> list[IndexQuote]:
+        quotes: list[IndexQuote] = []
+        for market, symbol, name, currency in INDEX_QUOTES:
+            if market in {Market.A, Market.HK}:
+                quote = self._index_quote_from_akshare(market, symbol, name, currency)
+                if quote.status.status == "ok":
+                    quotes.append(quote)
+                    continue
+
+            yahoo_quote = self._index_quote_from_yfinance(market, symbol, name, currency)
+            if yahoo_quote.status.status == "ok":
+                quotes.append(yahoo_quote)
+                continue
+
+            quote_path = GOOGLE_INDEX_PATHS.get(market)
+            if quote_path is not None:
+                google_quote = self._index_quote_from_google_finance(market, symbol, name, currency, quote_path)
+                quotes.append(google_quote if google_quote.status.status == "ok" else yahoo_quote)
+                continue
+
+            quotes.append(yahoo_quote)
         return quotes
 
     def search_symbols(self, market: Market, query: str, limit: int = 8) -> list[SymbolSearchResult]:
@@ -935,6 +972,162 @@ class MarketDataProvider:
             )
         except Exception as exc:
             return self._unavailable_quote(item, "USD", source, str(exc), "error")
+
+    def _index_quote_from_akshare(
+        self,
+        market: Market,
+        symbol: str,
+        name: str,
+        currency: str,
+    ) -> IndexQuote:
+        source = (
+            "AKShare / Eastmoney HK indexes"
+            if market == Market.HK
+            else "AKShare / Eastmoney A-share indexes"
+        )
+        try:
+            loader = self.ak.stock_hk_index_spot_em if market == Market.HK else self.ak.stock_zh_index_spot_em
+            frame = self._call_provider(loader, source, timeout_seconds=max(self.call_timeout_seconds, 8))
+            code_column = self._code_column(frame)
+            if frame.empty or code_column is None:
+                return IndexQuote(
+                    market=market,
+                    symbol=symbol,
+                    name=name,
+                    currency=currency,
+                    status=_status("unavailable", source, "No index rows returned."),
+                )
+
+            wanted = "HSI" if market == Market.HK else symbol.split(".")[0]
+            codes = frame[code_column].astype(str).str.upper().str.replace(r"^\^", "", regex=True)
+            matched = frame[codes == wanted]
+            if matched.empty:
+                return IndexQuote(
+                    market=market,
+                    symbol=symbol,
+                    name=name,
+                    currency=currency,
+                    status=_status("unavailable", source, f"No index row found for {wanted}."),
+                )
+
+            row = matched.iloc[0]
+            return IndexQuote(
+                market=market,
+                symbol=symbol,
+                name=str(_first_present(row, ["名称", "name"]) or name),
+                price=_float(_first_present(row, ["最新价", "现价", "price"])),
+                change=_float(_first_present(row, ["涨跌额", "涨跌", "change"])),
+                change_percent=_float(_first_present(row, ["涨跌幅", "changePercent"])),
+                open=_float(_first_present(row, ["今开", "开盘价", "open"])),
+                high=_float(_first_present(row, ["最高", "最高价", "high"])),
+                low=_float(_first_present(row, ["最低", "最低价", "low"])),
+                previous_close=_float(_first_present(row, ["昨收", "昨收价", "previousClose"])),
+                volume=_float(_first_present(row, ["成交量", "volume"])),
+                currency=currency,
+                status=_status("ok", source),
+            )
+        except Exception as exc:
+            return IndexQuote(
+                market=market,
+                symbol=symbol,
+                name=name,
+                currency=currency,
+                status=_status("error", source, str(exc)),
+            )
+
+    def _index_quote_from_yfinance(
+        self,
+        market: Market,
+        symbol: str,
+        name: str,
+        currency: str,
+    ) -> IndexQuote:
+        source = "yfinance / Yahoo Finance index"
+        try:
+            ticker = self.yf.Ticker(symbol)
+            info = ticker.fast_info
+            price = _float(info.get("lastPrice"))
+            previous_close = _float(info.get("previousClose"))
+            change = None
+            change_percent = None
+            if price is not None and previous_close not in (None, 0):
+                change = round(price - previous_close, 2)
+                change_percent = round((change / previous_close) * 100, 2)
+            return IndexQuote(
+                market=market,
+                symbol=symbol,
+                name=name,
+                price=price,
+                change=change,
+                change_percent=change_percent,
+                open=_float(info.get("open")),
+                high=_float(info.get("dayHigh")),
+                low=_float(info.get("dayLow")),
+                previous_close=previous_close,
+                volume=_float(info.get("lastVolume") or info.get("volume")),
+                currency=str(info.get("currency") or currency),
+                status=_status("ok", source),
+            )
+        except Exception as exc:
+            return IndexQuote(
+                market=market,
+                symbol=symbol,
+                name=name,
+                currency=currency,
+                status=_status("error", source, str(exc)),
+            )
+
+    def _index_quote_from_google_finance(
+        self,
+        market: Market,
+        symbol: str,
+        name: str,
+        currency: str,
+        quote_path: str,
+    ) -> IndexQuote:
+        source = "Google Finance index fallback"
+        try:
+            page_html = self._load_google_finance_quote_html(quote_path)
+            price_match = re.search(r'data-last-price="([^"]+)"', page_html)
+            if price_match is None:
+                return IndexQuote(
+                    market=market,
+                    symbol=symbol,
+                    name=name,
+                    currency=currency,
+                    status=_status("unavailable", source, "Google Finance page did not expose a last price."),
+                )
+            return IndexQuote(
+                market=market,
+                symbol=symbol,
+                name=name,
+                price=_float(html.unescape(price_match.group(1))),
+                currency=currency,
+                status=_status("ok", source),
+            )
+        except Exception as exc:
+            return IndexQuote(
+                market=market,
+                symbol=symbol,
+                name=name,
+                currency=currency,
+                status=_status("error", source, str(exc)),
+            )
+
+    def _load_google_finance_quote_html(self, quote_path: str) -> str:
+        response = httpx.get(
+            f"https://www.google.com/finance/quote/{quote_path}",
+            headers={
+                "User-Agent": (
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36"
+                )
+            },
+            timeout=max(self.call_timeout_seconds, 8),
+            follow_redirects=True,
+        )
+        response.raise_for_status()
+        return response.text
 
     def _quote_from_yahoo_fallback(self, item: WatchItem) -> Quote | None:
         ticker_symbol = self._yahoo_symbol_for_market(item)

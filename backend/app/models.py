@@ -82,6 +82,22 @@ class Quote(BaseModel):
     status: ProviderStatus
 
 
+class IndexQuote(BaseModel):
+    market: Market
+    symbol: str
+    name: str
+    price: float | None = None
+    change: float | None = None
+    change_percent: float | None = None
+    open: float | None = None
+    high: float | None = None
+    low: float | None = None
+    previous_close: float | None = None
+    volume: float | None = None
+    currency: str
+    status: ProviderStatus
+
+
 class GoldQuote(BaseModel):
     symbol: str
     name: str

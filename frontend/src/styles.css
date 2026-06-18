@@ -180,6 +180,24 @@ h2 {
   margin: 6px 0;
 }
 
+.market-strip .index-name {
+  font-size: 1.02rem;
+  line-height: 1.15;
+  margin: 6px 0 3px;
+}
+
+.index-price {
+  display: block;
+  font-size: 1.16rem;
+  font-weight: 900;
+  line-height: 1.15;
+  margin-bottom: 3px;
+}
+
+.index-change {
+  font-weight: 800;
+}
+
 .toolbar {
   justify-content: space-between;
   gap: 12px;
@@ -346,7 +364,7 @@ h2 {
 
 .quote-row {
   display: grid;
-  grid-template-columns: 64px minmax(140px, 1fr) minmax(92px, 0.72fr) 76px minmax(128px, 0.95fr) minmax(148px, 0.9fr) minmax(132px, 0.9fr) 36px;
+  grid-template-columns: 78px minmax(140px, 1fr) minmax(92px, 0.72fr) 76px minmax(128px, 0.95fr) minmax(148px, 0.9fr) minmax(132px, 0.9fr) 36px;
   align-items: center;
   gap: 8px;
   min-height: 58px;
@@ -375,12 +393,18 @@ h2 {
 }
 
 .market-tag {
-  width: fit-content;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 66px;
+  min-height: 26px;
   border: 1px solid #1b1c1f;
   border-radius: 999px;
-  padding: 2px 8px;
-  font-size: 0.76rem;
+  padding: 0 6px;
+  font-size: 0.72rem;
   font-weight: 800;
+  line-height: 1;
+  white-space: nowrap;
 }
 
 .symbol-cell {
@@ -586,7 +610,7 @@ h2 {
   }
 
   .quote-row {
-    grid-template-columns: 52px minmax(130px, 1fr) 84px 72px minmax(126px, 0.85fr) 36px;
+    grid-template-columns: 68px minmax(130px, 1fr) 84px 72px minmax(126px, 0.85fr) 36px;
   }
 
   .quote-row > span:nth-child(5),

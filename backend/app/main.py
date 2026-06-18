@@ -18,6 +18,7 @@ from app.models import (
     GoldQuote,
     HealthResponse,
     HealthService,
+    IndexQuote,
     Market,
     MarketStatus,
     OverviewResponse,
@@ -248,6 +249,7 @@ def create_app(
     market_provider = provider or MarketDataProvider()
     market_cache = cache or default_cache()
     quote_cache_ttl = env_int("MARKET_MONITOR_QUOTE_CACHE_TTL_SECONDS", 15)
+    index_cache_ttl = env_int("MARKET_MONITOR_INDEX_CACHE_TTL_SECONDS", 15)
     gold_cache_ttl = env_int("MARKET_MONITOR_GOLD_CACHE_TTL_SECONDS", 15)
     sector_cache_ttl = env_int("MARKET_MONITOR_SECTOR_CACHE_TTL_SECONDS", 60)
     sector_detail_refresh_count = env_int("MARKET_MONITOR_BACKGROUND_SECTOR_DETAIL_COUNT", 3)
@@ -321,6 +323,23 @@ def create_app(
             market_provider.get_quotes(items),
         )
 
+    def cached_indexes() -> list[IndexQuote]:
+        return cache_models(
+            market_cache,
+            "indexes:global",
+            index_cache_ttl,
+            IndexQuote,
+            market_provider.get_index_quotes,
+        )
+
+    def refresh_index_cache() -> list[IndexQuote]:
+        return set_cached_models(
+            market_cache,
+            "indexes:global",
+            index_cache_ttl,
+            market_provider.get_index_quotes(),
+        )
+
     def cached_gold() -> GoldQuote:
         return cache_model(
             market_cache,
@@ -376,12 +395,13 @@ def create_app(
         watchlist = await refresh_call("watchlist", resolved_watchlist)
         initial_results = await asyncio.gather(
             refresh_call("quotes", refresh_quotes_cache, watchlist),
+            refresh_call("indexes", refresh_index_cache),
             refresh_call("gold", refresh_gold_cache),
             *(refresh_call(f"{market.value} sectors", refresh_sector_cache, market) for market in MARKETS),
             return_exceptions=True,
         )
         errors = [result for result in initial_results if isinstance(result, Exception)]
-        sector_responses = [result for result in initial_results[2:] if isinstance(result, SectorResponse)]
+        sector_responses = [result for result in initial_results[3:] if isinstance(result, SectorResponse)]
         detail_limit = max(0, sector_detail_refresh_count)
         detail_tasks = [
             refresh_call(f"{response.market.value} {item.name} sector details", refresh_sector_details_cache, response.market, item.name, 12)
@@ -393,8 +413,10 @@ def create_app(
         if errors:
             messages = "; ".join(str(error) for error in errors[:3])
             raise RuntimeError(messages)
+        index_result = initial_results[1]
         return {
             "quotes": len(watchlist),
+            "indexes": len(index_result) if isinstance(index_result, list) else 0,
             "sectors": len(sector_responses),
             "sector_details": sum(1 for result in detail_results if not isinstance(result, Exception)),
         }
@@ -417,6 +439,7 @@ def create_app(
                     updated_at=utc_now_iso(),
                     message=(
                         f"Cached {counts['quotes']} quotes, "
+                        f"{counts['indexes']} index panels, "
                         f"{counts['sectors']} sector panels, "
                         f"{counts['sector_details']} sector detail panels"
                     ),
@@ -495,6 +518,20 @@ def create_app(
         except Exception as exc:
             services.append(HealthService(name="Gold", status="error", source="market provider", updated_at=utc_now_iso(), message=str(exc)))
         try:
+            index_statuses = [index.status for index in cached_indexes()]
+            services.append(
+                HealthService(
+                    name="Indexes",
+                    status=aggregate_status([status.status for status in index_statuses]),
+                    source=" / ".join(sorted({status.source for status in index_statuses})) or "market provider",
+                    updated_at=max((status.updated_at for status in index_statuses), default=utc_now_iso()),
+                )
+            )
+        except Exception as exc:
+            services.append(
+                HealthService(name="Indexes", status="error", source="market provider", updated_at=utc_now_iso(), message=str(exc))
+            )
+        try:
             sector_statuses = [cached_sectors(market).status for market in MARKETS]
             services.append(
                 HealthService(
@@ -529,6 +566,10 @@ def create_app(
     @app.get("/api/quotes", response_model=list[Quote])
     def get_quotes() -> list[Quote]:
         return cached_quotes(resolved_watchlist())
+
+    @app.get("/api/indexes", response_model=list[IndexQuote])
+    def get_indexes() -> list[IndexQuote]:
+        return cached_indexes()
 
     @app.get("/api/gold", response_model=GoldQuote)
     def get_gold() -> GoldQuote:

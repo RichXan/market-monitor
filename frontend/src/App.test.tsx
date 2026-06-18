@@ -7,6 +7,7 @@ import {
   deleteWatchItem,
   fetchGold,
   fetchHealth,
+  fetchIndexes,
   fetchMarketStatuses,
   fetchQuotes,
   fetchSectorDetails,
@@ -17,6 +18,7 @@ import {
 import type {
   GoldQuote,
   HealthResponse,
+  IndexQuote,
   MarketStatus,
   Quote,
   SectorDetailResponse,
@@ -29,6 +31,7 @@ vi.mock("./api", () => ({
   fetchWatchlist: vi.fn(),
   fetchQuotes: vi.fn(),
   fetchGold: vi.fn(),
+  fetchIndexes: vi.fn(),
   fetchSectors: vi.fn(),
   fetchSectorDetails: vi.fn(),
   fetchHealth: vi.fn(),
@@ -106,6 +109,39 @@ const gold: GoldQuote = {
   status: { status: "ok", source: "AKShare", updated_at: "2026-06-17T00:00:00+00:00" }
 };
 
+const indexes: IndexQuote[] = [
+  {
+    market: "a",
+    symbol: "000001.SS",
+    name: "上证指数",
+    price: 3100,
+    change: 12,
+    change_percent: 0.39,
+    currency: "CNY",
+    status: { status: "ok", source: "yfinance / Yahoo Finance index", updated_at: "2026-06-17T00:00:00+00:00" }
+  },
+  {
+    market: "hk",
+    symbol: "^HSI",
+    name: "恒生指数",
+    price: 18000,
+    change: -80,
+    change_percent: -0.44,
+    currency: "HKD",
+    status: { status: "ok", source: "yfinance / Yahoo Finance index", updated_at: "2026-06-17T00:00:00+00:00" }
+  },
+  {
+    market: "us",
+    symbol: "^GSPC",
+    name: "标普500",
+    price: 4900,
+    change: 20,
+    change_percent: 0.41,
+    currency: "USD",
+    status: { status: "ok", source: "yfinance / Yahoo Finance index", updated_at: "2026-06-17T00:00:00+00:00" }
+  }
+];
+
 const sectors: Record<string, SectorResponse> = {
   a: {
     market: "a",
@@ -178,6 +214,7 @@ describe("App", () => {
     vi.mocked(fetchWatchlist).mockResolvedValue(watchlist);
     vi.mocked(fetchQuotes).mockResolvedValue(quotes);
     vi.mocked(fetchGold).mockResolvedValue(gold);
+    vi.mocked(fetchIndexes).mockResolvedValue(indexes);
     vi.mocked(fetchSectors).mockImplementation(async (market) => sectors[market]);
     vi.mocked(fetchSectorDetails).mockResolvedValue(sectorDetail);
     vi.mocked(fetchHealth).mockResolvedValue(health);
@@ -191,6 +228,7 @@ describe("App", () => {
     vi.mocked(fetchWatchlist).mockReturnValue(new Promise(() => {}));
     vi.mocked(fetchQuotes).mockReturnValue(new Promise(() => {}));
     vi.mocked(fetchGold).mockReturnValue(new Promise(() => {}));
+    vi.mocked(fetchIndexes).mockReturnValue(new Promise(() => {}));
     vi.mocked(fetchSectors).mockReturnValue(new Promise(() => {}));
     vi.mocked(fetchHealth).mockReturnValue(new Promise(() => {}));
     vi.mocked(fetchMarketStatuses).mockReturnValue(new Promise(() => {}));
@@ -212,11 +250,17 @@ describe("App", () => {
     expect(screen.getByText("$65,000.00")).toBeInTheDocument();
     expect(screen.getAllByText("加密货币").length).toBeGreaterThan(0);
     expect(screen.getByText("上海金 Au99.99")).toBeInTheDocument();
-    expect(screen.getAllByText("自选 1")).toHaveLength(3);
-    expect(screen.getAllByText("已报价 1/1")).toHaveLength(3);
+    expect(screen.getByText("上证指数")).toBeInTheDocument();
+    expect(screen.getByText("恒生指数")).toBeInTheDocument();
+    expect(screen.getByText("标普500")).toBeInTheDocument();
+    expect(screen.getByText("¥3,100.00")).toBeInTheDocument();
+    expect(screen.getByText("HK$18,000.00")).toBeInTheDocument();
+    expect(screen.getByText("$4,900.00")).toBeInTheDocument();
+    expect(screen.getAllByText("自选 1")).toHaveLength(1);
+    expect(screen.getAllByText("已报价 1/1")).toHaveLength(1);
     expect(screen.getByText("暂无板块排行")).toBeInTheDocument();
     expect(screen.getByText("Technology")).toBeInTheDocument();
-    expect(screen.getByText("交易中")).toBeInTheDocument();
+    expect(screen.getByText(/交易中/)).toBeInTheDocument();
     expect(screen.getByText("接口健康")).toBeInTheDocument();
     expect(screen.getByText("Cache")).toBeInTheDocument();
     expect(screen.getByText("部分板块成分刷新超时")).toBeInTheDocument();

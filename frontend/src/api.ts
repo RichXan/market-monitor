@@ -1,6 +1,7 @@
 import type {
   GoldQuote,
   HealthResponse,
+  IndexQuote,
   Market,
   MarketStatus,
   OverviewResponse,
@@ -43,6 +44,10 @@ export function fetchQuotes(): Promise<Quote[]> {
 
 export function fetchGold(): Promise<GoldQuote> {
   return request<GoldQuote>("/api/gold");
+}
+
+export function fetchIndexes(): Promise<IndexQuote[]> {
+  return request<IndexQuote[]>("/api/indexes");
 }
 
 export function fetchHealth(): Promise<HealthResponse> {

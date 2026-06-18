@@ -2,7 +2,7 @@ import time
 
 import pandas as pd
 
-from app.models import Market, WatchItem
+from app.models import IndexQuote, Market, ProviderStatus, WatchItem
 from app.providers import MarketDataProvider
 
 
@@ -33,6 +33,16 @@ class FakeTicker:
         if symbol == "BTC-USD":
             last_price = 65000.0
             previous_close = 64000.0
+        if symbol == "000001.SS":
+            last_price = 3100.0
+            previous_close = 3080.0
+        if symbol == "^HSI":
+            currency = "HKD"
+            last_price = 18000.0
+            previous_close = 18100.0
+        if symbol == "^GSPC":
+            last_price = 4900.0
+            previous_close = 4880.0
         if symbol.startswith("XL") and symbol not in {"XLK", "XLF", "XLV"}:
             last_price = 100.0
             previous_close = 100.0
@@ -116,6 +126,23 @@ class FailingYFinance:
         raise ConnectionError("Yahoo failed")
 
 
+class FailingGoogleFallbackProvider(MarketDataProvider):
+    def _index_quote_from_google_finance(self, market, symbol, name, currency, quote_path):
+        return IndexQuote(
+            market=market,
+            symbol=symbol,
+            name=name,
+            currency=currency,
+            status=ProviderStatus(status="error", source="disabled fallback", updated_at="2026-06-17T00:00:00+00:00"),
+        )
+
+
+class GoogleIndexFallbackProvider(MarketDataProvider):
+    def _load_google_finance_quote_html(self, quote_path: str) -> str:
+        assert quote_path == ".INX:INDEXSP"
+        return '<div data-last-price="7420.1" data-last-normal-market-timestamp="1781729434"></div>'
+
+
 class FakeAKShare:
     def stock_info_a_code_name(self):
         return pd.DataFrame(
@@ -160,6 +187,42 @@ class FakeAKShare:
                     "昨收": 412.6,
                     "成交量": 22000000,
                     "成交额": 9020000000,
+                }
+            ]
+        )
+
+    def stock_zh_index_spot_em(self):
+        return pd.DataFrame(
+            [
+                {
+                    "代码": "000001",
+                    "名称": "上证指数",
+                    "最新价": 4108.08,
+                    "涨跌额": 15.36,
+                    "涨跌幅": 0.38,
+                    "今开": 4092.72,
+                    "最高": 4110.0,
+                    "最低": 4080.0,
+                    "昨收": 4092.72,
+                    "成交量": 310000000,
+                }
+            ]
+        )
+
+    def stock_hk_index_spot_em(self):
+        return pd.DataFrame(
+            [
+                {
+                    "代码": "HSI",
+                    "名称": "恒生指数",
+                    "最新价": 24312.16,
+                    "涨跌额": -181.79,
+                    "涨跌幅": -0.74,
+                    "今开": 24500.0,
+                    "最高": 24600.0,
+                    "最低": 24250.0,
+                    "昨收": 24493.95,
+                    "成交量": 0,
                 }
             ]
         )
@@ -359,6 +422,49 @@ def test_provider_normalizes_gold_quote():
     assert quote.price == 756.2
     assert quote.status.status == "ok"
     assert quote.status.source == "AKShare / Shanghai Gold Exchange"
+
+
+def test_provider_returns_market_index_quotes():
+    provider = MarketDataProvider(ak_module=FakeAKShare(), yf_module=FakeYFinance())
+
+    indexes = provider.get_index_quotes()
+
+    assert [(item.market, item.symbol, item.name) for item in indexes] == [
+        (Market.A, "000001.SS", "上证指数"),
+        (Market.HK, "^HSI", "恒生指数"),
+        (Market.US, "^GSPC", "标普500"),
+    ]
+    assert indexes[0].price == 4108.08
+    assert indexes[0].change_percent == 0.38
+    assert indexes[0].currency == "CNY"
+    assert indexes[1].price == 24312.16
+    assert indexes[1].change_percent == -0.74
+    assert indexes[1].currency == "HKD"
+    assert indexes[2].change == 20.0
+    assert indexes[2].currency == "USD"
+
+
+def test_provider_prefers_akshare_for_a_and_hk_index_quotes():
+    provider = FailingGoogleFallbackProvider(ak_module=FakeAKShare(), yf_module=FailingYFinance())
+
+    indexes = provider.get_index_quotes()
+
+    assert indexes[0].price == 4108.08
+    assert indexes[0].status.source == "AKShare / Eastmoney A-share indexes"
+    assert indexes[1].price == 24312.16
+    assert indexes[1].status.source == "AKShare / Eastmoney HK indexes"
+    assert indexes[2].status.status == "error"
+
+
+def test_provider_falls_back_to_google_finance_for_us_index_quote():
+    provider = GoogleIndexFallbackProvider(ak_module=FakeAKShare(), yf_module=FailingYFinance())
+
+    indexes = provider.get_index_quotes()
+
+    assert indexes[2].market == Market.US
+    assert indexes[2].price == 7420.1
+    assert indexes[2].currency == "USD"
+    assert indexes[2].status.source == "Google Finance index fallback"
 
 
 def test_provider_searches_a_hk_and_us_symbols_by_name():

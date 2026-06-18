@@ -5,6 +5,7 @@ import {
   deleteWatchItem,
   fetchGold,
   fetchHealth,
+  fetchIndexes,
   fetchMarketStatuses,
   fetchQuotes,
   fetchSectorDetails,
@@ -16,6 +17,7 @@ import { formatCurrency, formatPercent, movementClass } from "./format";
 import type {
   GoldQuote,
   HealthResponse,
+  IndexQuote,
   HealthService,
   Market,
   MarketStatus,
@@ -30,6 +32,7 @@ import type {
 import "./styles.css";
 
 const quoteMarkets: Market[] = ["a", "hk", "us", "crypto"];
+const indexMarkets: Market[] = ["a", "hk", "us"];
 const sectorMarkets: Market[] = ["a", "hk", "us"];
 
 const marketLabels: Record<Market, string> = {
@@ -44,6 +47,19 @@ const marketHint: Record<Market, string> = {
   hk: "AKShare / 东方财富延迟；必要时 Yahoo 兜底",
   us: "Yahoo Finance / yfinance",
   crypto: "Yahoo Finance / yfinance crypto"
+};
+
+const marketCurrencies: Record<Market, string> = {
+  a: "CNY",
+  hk: "HKD",
+  us: "USD",
+  crypto: "USD"
+};
+
+const indexFallbackNames: Partial<Record<Market, string>> = {
+  a: "上证指数",
+  hk: "恒生指数",
+  us: "标普500"
 };
 
 const initialGold: GoldQuote = {
@@ -151,6 +167,7 @@ function mergeWatchItems(items: WatchItem[], additions: WatchItem[]): WatchItem[
 export default function App() {
   const [watchlist, setWatchlist] = useState<WatchItem[]>([]);
   const [quotes, setQuotes] = useState<Quote[]>([]);
+  const [indexes, setIndexes] = useState<IndexQuote[]>([]);
   const [gold, setGold] = useState<GoldQuote>(initialGold);
   const [sectors, setSectors] = useState<SectorResponse[]>(initialSectors);
   const [health, setHealth] = useState<HealthResponse>(initialHealth);
@@ -171,6 +188,10 @@ export default function App() {
     return new Map(quotes.map((quote) => [quote.id, quote]));
   }, [quotes]);
 
+  const indexByMarket = useMemo(() => {
+    return new Map(indexes.map((index) => [index.market, index]));
+  }, [indexes]);
+
   const marketStatusByMarket = useMemo(() => {
     return new Map(marketStatuses.map((status) => [status.market, status]));
   }, [marketStatuses]);
@@ -179,6 +200,7 @@ export default function App() {
     const failures: string[] = [];
     const watchlistPromise = fetchWatchlist();
     const quotesPromise = fetchQuotes();
+    const indexesPromise = fetchIndexes();
     const goldPromise = fetchGold();
     const healthPromise = fetchHealth();
     const marketStatusesPromise = fetchMarketStatuses();
@@ -190,8 +212,9 @@ export default function App() {
       failures.push("自选列表");
     }
 
-    const [quotesResult, goldResult, healthResult, marketStatusesResult] = await Promise.allSettled([
+    const [quotesResult, indexesResult, goldResult, healthResult, marketStatusesResult] = await Promise.allSettled([
       quotesPromise,
+      indexesPromise,
       goldPromise,
       healthPromise,
       marketStatusesPromise
@@ -199,6 +222,9 @@ export default function App() {
 
     if (quotesResult.status === "fulfilled") setQuotes(quotesResult.value);
     else failures.push("行情");
+
+    if (indexesResult.status === "fulfilled") setIndexes(indexesResult.value);
+    else failures.push("指数");
 
     if (goldResult.status === "fulfilled") setGold(goldResult.value);
     else failures.push("黄金");
@@ -384,7 +410,15 @@ export default function App() {
           <small>{gold.name}</small>
           <small>{gold.status.source}</small>
         </div>
-        {quoteMarkets.map((market) => {
+        {indexMarkets.map((market) => (
+          <IndexSummaryCard
+            key={market}
+            market={market}
+            index={indexByMarket.get(market)}
+            status={marketStatusByMarket.get(market)}
+          />
+        ))}
+        {quoteMarkets.filter((market) => market === "crypto").map((market) => {
           const marketItems = watchlist.filter((item) => item.market === market);
           const quoted = marketItems.filter((item) => {
             const quote = quotesById.get(item.id);
@@ -489,6 +523,33 @@ export default function App() {
         />
       </section>
     </main>
+  );
+}
+
+function IndexSummaryCard({
+  market,
+  index,
+  status
+}: {
+  market: Market;
+  index?: IndexQuote;
+  status?: MarketStatus;
+}) {
+  const currency = index?.currency ?? marketCurrencies[market];
+  return (
+    <div className="index-summary-card">
+      <span className="strip-label">{marketLabels[market]}</span>
+      <strong className="index-name">{index?.name ?? indexFallbackNames[market] ?? marketLabels[market]}</strong>
+      <span className={`index-price ${movementClass(index?.change_percent)}`}>{formatCurrency(index?.price, currency)}</span>
+      <small className={`index-change ${movementClass(index?.change_percent)}`}>
+        {formatPercent(index?.change_percent)}
+        {index?.change !== null && index?.change !== undefined ? ` / ${formatCurrency(index.change, currency)}` : ""}
+      </small>
+      <small>{index?.status.source ?? marketHint[market]}</small>
+      <small>
+        {status?.label ?? "状态读取中"} · 更新 {formatTime(index?.status.updated_at)}
+      </small>
+    </div>
   );
 }
 
