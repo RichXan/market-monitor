@@ -254,7 +254,7 @@ describe("App", () => {
     render(<App />);
 
     expect(screen.getByText("全球行情监控")).toBeInTheDocument();
-    expect(screen.getByText("自选行情")).toBeInTheDocument();
+    expect(screen.getByText("自选股行情")).toBeInTheDocument();
     expect(screen.getAllByText("加载中")).not.toHaveLength(0);
     expect(screen.queryByText("正在连接本地行情服务...")).not.toBeInTheDocument();
   });
@@ -278,8 +278,8 @@ describe("App", () => {
     expect(screen.getByText("暂无板块排行")).toBeInTheDocument();
     expect(screen.getByText("Technology")).toBeInTheDocument();
     expect(screen.getByText(/交易中/)).toBeInTheDocument();
-    expect(screen.getAllByText("更新").length).toBeGreaterThan(0);
-    expect(screen.getByLabelText("日内区间 AAPL")).toBeInTheDocument();
+    expect(screen.getAllByText(/更新/).length).toBeGreaterThan(0);
+    expect(screen.getByLabelText("AAPL 行情卡")).toBeInTheDocument();
   });
 
   it("shows BTC and ETH live prices in the crypto summary card", async () => {
@@ -314,17 +314,18 @@ describe("App", () => {
     expect(screen.queryByRole("region", { name: "接口健康" })).not.toBeInTheDocument();
   });
 
-  it("renders today's turnover and volume for each watchlist quote", async () => {
+  it("renders compact quote cards with status text and sparklines", async () => {
     render(<App />);
 
     expect(await screen.findByText("Apple")).toBeInTheDocument();
-    expect(screen.getAllByText("今日成交额").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("今日成交量").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("24h成交额 USD").length).toBeGreaterThan(0);
-    expect(screen.getByText("24h成交量 BTC")).toBeInTheDocument();
-    expect(screen.getByText("24h成交量 ETH")).toBeInTheDocument();
-    expect(screen.getByText("1.23亿")).toBeInTheDocument();
-    expect(screen.getByText("765.43万")).toBeInTheDocument();
+    expect(screen.queryByRole("table")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("AAPL 行情卡")).toBeInTheDocument();
+    expect(screen.getByLabelText("AAPL 日内走势示意")).toBeInTheDocument();
+    expect(screen.getAllByText("震荡上涨").length).toBeGreaterThan(0);
+    expect(screen.getByText("震荡下跌")).toBeInTheDocument();
+    expect(screen.getByText("+1.26%")).toBeInTheDocument();
+    expect(screen.getAllByText("-1.41%").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("$65,000.00").length).toBeGreaterThan(0);
   });
 
   it("loads sector constituents when a sector row is selected", async () => {

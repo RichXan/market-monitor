@@ -1,4 +1,4 @@
-import { Activity, AlertTriangle, Clock3, Plus, Radio, RefreshCw, Trash2 } from "lucide-react";
+import { Activity, AlertTriangle, Clock3, MoreHorizontal, Plus, Radio, RefreshCw, Trash2, TrendingUp } from "lucide-react";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import {
   addWatchItem,
@@ -125,13 +125,6 @@ function formatTime(value?: string | null): string {
   });
 }
 
-function rangePosition(value?: number | null, low?: number | null, high?: number | null): number {
-  if (value === null || value === undefined || low === null || low === undefined || high === null || high === undefined || high <= low) {
-    return 50;
-  }
-  return Math.max(0, Math.min(100, ((value - low) / (high - low)) * 100));
-}
-
 function goldPrice(gold: GoldQuote): string {
   const price = gold.price;
   if (price === null || price === undefined) return "--";
@@ -166,6 +159,44 @@ function mergeWatchItems(items: WatchItem[], additions: WatchItem[]): WatchItem[
 
 function baseAsset(symbol: string): string {
   return symbol.split("-")[0] || symbol;
+}
+
+function quoteStatusText(quote?: Quote): string {
+  const change = quote?.change_percent;
+  if (change === null || change === undefined || Number.isNaN(change)) return "等待报价";
+  if (change >= 3) return "快速上涨";
+  if (change > 0) return "震荡上涨";
+  if (change <= -3) return "快速下跌";
+  if (change < 0) return "震荡下跌";
+  return "横盘整理";
+}
+
+function quoteSparkValues(quote?: Quote): number[] {
+  const fallback = quote?.price ?? quote?.previous_close ?? quote?.open;
+  if (fallback === null || fallback === undefined || Number.isNaN(fallback)) return [];
+  const previous = quote?.previous_close ?? fallback;
+  const open = quote?.open ?? previous;
+  const price = quote?.price ?? open;
+  const low = quote?.low ?? Math.min(previous, open, price);
+  const high = quote?.high ?? Math.max(previous, open, price);
+  if ((quote?.change_percent ?? 0) >= 0) {
+    return [previous, open, low, (open + price) / 2, high, price];
+  }
+  return [previous, open, high, (open + price) / 2, low, price];
+}
+
+function sparklinePath(values: number[], width = 78, height = 34): string {
+  if (values.length === 0) return "";
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const spread = max - min || 1;
+  return values
+    .map((value, index) => {
+      const x = (index / Math.max(1, values.length - 1)) * width;
+      const y = height - ((value - min) / spread) * height;
+      return `${index === 0 ? "M" : "L"}${x.toFixed(1)},${y.toFixed(1)}`;
+    })
+    .join(" ");
 }
 
 export default function App() {
@@ -644,62 +675,42 @@ function WatchlistPanel({
   onDelete: (id: string) => Promise<void>;
 }) {
   return (
-    <section className="panel watchlist-panel">
-      <div className="panel-header">
-        <div>
-          <h2>自选行情</h2>
-          <p>页面内增删，本地保存</p>
+    <section className="panel watchlist-panel compact-watchlist-panel">
+      <div className="panel-header compact-watchlist-header">
+        <div className="compact-title">
+          <TrendingUp aria-hidden="true" size={18} />
+          <div>
+            <h2>自选股行情</h2>
+            <p>页面内增删，本地保存</p>
+          </div>
         </div>
+        <button className="icon-button ghost compact-more-button" type="button" aria-label="自选行情更多" title="自选行情更多">
+          <MoreHorizontal aria-hidden="true" size={17} />
+        </button>
       </div>
-      <div className="quote-table" role="table">
-        <div className="quote-row quote-head" role="row">
-          <span>市场</span>
-          <span>标的</span>
-          <span>最新</span>
-          <span>涨跌幅</span>
-          <span>日内</span>
-          <span>今日成交</span>
-          <span>更新</span>
-          <span></span>
-        </div>
+      <div className="compact-quote-list" aria-label="紧凑自选行情">
         {watchlist.length === 0 ? (
           <div className="empty-table-row">加载中</div>
         ) : (
           watchlist.map((item) => {
             const quote = quotesById.get(item.id);
             const movement = movementClass(quote?.change_percent);
-            const amountLabel = item.market === "crypto" ? `24h成交额 ${quote?.currency ?? "USD"}` : "今日成交额";
-            const volumeLabel = item.market === "crypto" ? `24h成交量 ${baseAsset(item.symbol)}` : "今日成交量";
             return (
-              <div className="quote-row" role="row" key={item.id}>
-                <span className="market-tag">{marketLabels[item.market]}</span>
-                <span className="symbol-cell">
+              <article className={`compact-quote-card ${movement}`} aria-label={`${item.symbol} 行情卡`} key={item.id}>
+                <div className="compact-quote-identity">
                   <strong>{quote?.name ?? item.name ?? item.symbol}</strong>
+                  <small className={movement}>{quoteStatusText(quote)}</small>
                   <small>{item.symbol}</small>
-                </span>
-                <span>{quote ? formatCurrency(quote.price, quote.currency) : "--"}</span>
-                <span className={movement}>{formatPercent(quote?.change_percent)}</span>
-                <span>
-                  <PriceRange quote={quote} symbol={item.symbol} />
-                </span>
-                <span className="quote-activity-cell" aria-label={`${item.symbol} 今日成交`}>
-                  <span>
-                    <small>{amountLabel}</small>
-                    <strong>{formatCompact(quote?.amount)}</strong>
-                  </span>
-                  <span>
-                    <small>{volumeLabel}</small>
-                    <strong>{formatCompact(quote?.volume)}</strong>
-                  </span>
-                </span>
-                <span className="source-cell">
-                  <span>更新</span> {formatTime(quote?.status.updated_at)}
-                  <small>{quote?.status.source ?? marketHint[item.market]}</small>
-                </span>
-                <button className="icon-button ghost" onClick={() => onDelete(item.id)} title={`删除 ${item.symbol}`} aria-label={`删除 ${item.symbol}`}>
+                </div>
+                <QuoteSparkline quote={quote} symbol={item.symbol} />
+                <div className="compact-quote-values">
+                  <strong className={movement}>{formatPercent(quote?.change_percent)}</strong>
+                  <small>{quote ? formatCurrency(quote.price, quote.currency) : "--"}</small>
+                </div>
+                <button className="icon-button ghost compact-delete-button" onClick={() => onDelete(item.id)} title={`删除 ${item.symbol}`} aria-label={`删除 ${item.symbol}`}>
                   <Trash2 aria-hidden="true" size={16} />
                 </button>
-              </div>
+              </article>
             );
           })
         )}
@@ -708,22 +719,15 @@ function WatchlistPanel({
   );
 }
 
-function PriceRange({ quote, symbol }: { quote?: Quote; symbol: string }) {
-  if (!quote || quote.low === null || quote.low === undefined || quote.high === null || quote.high === undefined) {
-    return <span className="range-empty">--</span>;
-  }
-  const marker = rangePosition(quote.price, quote.low, quote.high);
-  const open = rangePosition(quote.open, quote.low, quote.high);
+function QuoteSparkline({ quote, symbol }: { quote?: Quote; symbol: string }) {
+  const values = quoteSparkValues(quote);
+  const path = sparklinePath(values);
+  const movement = movementClass(quote?.change_percent);
   return (
-    <span className="range-cell" aria-label={`日内区间 ${symbol}`}>
-      <span className="range-track">
-        <span className="range-open" style={{ left: `${open}%` }} />
-        <span className="range-marker" style={{ left: `${marker}%` }} />
-      </span>
-      <small>
-        L {formatCurrency(quote.low, quote.currency)} / H {formatCurrency(quote.high, quote.currency)}
-      </small>
-    </span>
+    <svg className={`quote-sparkline ${movement}`} aria-label={`${symbol} 日内走势示意`} role="img" viewBox="0 0 78 34" preserveAspectRatio="none">
+      <path className="quote-sparkline-axis" d="M0 17 H78" />
+      {path ? <path className="quote-sparkline-path" d={path} /> : null}
+    </svg>
   );
 }
 

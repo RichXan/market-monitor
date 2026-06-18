@@ -439,29 +439,153 @@ h2 {
   margin-bottom: 10px;
 }
 
-.quote-table {
+.compact-watchlist-panel {
+  padding: 10px;
+}
+
+.compact-watchlist-header {
+  margin-bottom: 8px;
+}
+
+.compact-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.compact-title svg {
+  color: #2a9a45;
+}
+
+.compact-more-button,
+.compact-delete-button {
+  width: 30px;
+  min-height: 30px;
+}
+
+.compact-quote-list {
   display: grid;
   gap: 6px;
 }
 
-.quote-row {
+.compact-quote-card {
   display: grid;
-  grid-template-columns: 78px minmax(140px, 1fr) minmax(92px, 0.72fr) 76px minmax(128px, 0.95fr) minmax(148px, 0.9fr) minmax(132px, 0.9fr) 36px;
+  grid-template-columns: minmax(132px, 1fr) minmax(92px, 0.62fr) minmax(74px, auto) 30px;
   align-items: center;
-  gap: 8px;
-  min-height: 58px;
-  padding: 8px 9px;
-  border: 1px solid #d3d0c6;
+  gap: 9px;
+  min-height: 48px;
+  padding: 7px 7px 7px 10px;
+  border: 1px solid transparent;
   border-radius: 6px;
-  background: #fbfaf5;
+  background: #f0f0ee;
 }
 
-.quote-head {
-  min-height: 34px;
-  background: #1b1c1f;
-  color: #fffdf7;
-  font-size: 0.73rem;
-  font-weight: 800;
+.compact-quote-card.positive {
+  border-left: 3px solid #2a9a45;
+}
+
+.compact-quote-card.negative {
+  border-left: 3px solid #c7362f;
+}
+
+.compact-quote-card.flat {
+  border-left: 3px solid #b8b5aa;
+}
+
+.compact-quote-card:hover {
+  border-color: #d3d0c6;
+  background: #f7f6f1;
+}
+
+.compact-quote-identity {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+
+.compact-quote-identity strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.93rem;
+  line-height: 1.15;
+}
+
+.compact-quote-identity small {
+  font-size: 0.72rem;
+  line-height: 1.15;
+}
+
+.compact-quote-identity small:last-child {
+  color: #62615d;
+}
+
+.quote-sparkline {
+  width: 100%;
+  min-width: 78px;
+  height: 34px;
+  display: block;
+  overflow: visible;
+}
+
+.quote-sparkline-axis {
+  fill: none;
+  stroke: rgba(98, 97, 93, 0.35);
+  stroke-width: 1;
+  stroke-dasharray: 4 6;
+}
+
+.quote-sparkline-path {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.quote-sparkline.positive {
+  color: #2a9a45;
+}
+
+.quote-sparkline.negative {
+  color: #c7362f;
+}
+
+.quote-sparkline.flat {
+  color: #62615d;
+}
+
+.compact-quote-values {
+  display: grid;
+  justify-items: end;
+  gap: 2px;
+  min-width: 0;
+}
+
+.compact-quote-values strong {
+  font-size: 0.85rem;
+  line-height: 1.1;
+}
+
+.compact-quote-values small {
+  color: #1b1c1f;
+  font-size: 0.76rem;
+  line-height: 1.1;
+  white-space: nowrap;
+}
+
+.compact-delete-button {
+  opacity: 0.42;
+}
+
+.compact-quote-card:hover .compact-delete-button,
+.compact-delete-button:focus-visible {
+  opacity: 1;
+}
+
+.compact-delete-button:hover {
+  transform: none;
+  box-shadow: none;
 }
 
 .empty-table-row {
@@ -474,93 +598,9 @@ h2 {
   align-items: center;
 }
 
-.market-tag {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 66px;
-  min-height: 26px;
-  border: 1px solid #1b1c1f;
-  border-radius: 999px;
-  padding: 0 6px;
-  font-size: 0.72rem;
-  font-weight: 800;
-  line-height: 1;
-  white-space: nowrap;
-}
-
 .symbol-cell {
   display: grid;
   gap: 2px;
-}
-
-.range-cell {
-  display: grid;
-  gap: 4px;
-  min-width: 0;
-}
-
-.range-cell small {
-  color: #62615d;
-  font-size: 0.68rem;
-  white-space: nowrap;
-}
-
-.range-track {
-  position: relative;
-  height: 8px;
-  border: 1px solid #1b1c1f;
-  border-radius: 999px;
-  background: linear-gradient(90deg, #ffd1bd, #f4e79a, #d7f36f);
-}
-
-.range-marker,
-.range-open {
-  position: absolute;
-  top: 50%;
-  transform: translate(-50%, -50%);
-}
-
-.range-marker {
-  width: 10px;
-  height: 14px;
-  border: 1px solid #1b1c1f;
-  border-radius: 999px;
-  background: #1b1c1f;
-}
-
-.range-open {
-  width: 2px;
-  height: 14px;
-  background: #fffdf7;
-  box-shadow: 0 0 0 1px #1b1c1f;
-}
-
-.range-empty {
-  color: #62615d;
-}
-
-.quote-activity-cell {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 7px;
-  min-width: 0;
-}
-
-.quote-activity-cell > span {
-  display: grid;
-  gap: 2px;
-  min-width: 0;
-}
-
-.quote-activity-cell small {
-  color: #62615d;
-  font-size: 0.68rem;
-  white-space: nowrap;
-}
-
-.quote-activity-cell strong {
-  font-size: 0.86rem;
 }
 
 .positive {
@@ -696,15 +736,8 @@ h2 {
     flex-wrap: wrap;
   }
 
-  .quote-row {
-    grid-template-columns: 68px minmax(130px, 1fr) 84px 72px minmax(126px, 0.85fr) 36px;
-  }
-
-  .quote-row > span:nth-child(5),
-  .quote-row > span:nth-child(7),
-  .quote-head > span:nth-child(5),
-  .quote-head > span:nth-child(7) {
-    display: none;
+  .compact-quote-card {
+    grid-template-columns: minmax(120px, 1fr) minmax(86px, 0.7fr) minmax(70px, auto) 30px;
   }
 }
 
@@ -742,21 +775,16 @@ h2 {
     width: 100%;
   }
 
-  .quote-row {
-    grid-template-columns: minmax(0, 1fr) 86px 72px 36px;
+  .compact-quote-card {
+    grid-template-columns: minmax(0, 1fr) minmax(78px, auto) 30px;
+    gap: 8px;
   }
 
-  .quote-row > span:first-child,
-  .quote-row > span:nth-child(5),
-  .quote-row > span:nth-child(7),
-  .quote-head {
-    display: none;
-  }
-
-  .quote-activity-cell {
+  .quote-sparkline {
     grid-column: 1 / -1;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    padding-top: 4px;
+    min-width: 0;
+    height: 28px;
+    padding-top: 2px;
     border-top: 1px dashed #d3d0c6;
   }
 }
