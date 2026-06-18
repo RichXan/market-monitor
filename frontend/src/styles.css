@@ -447,6 +447,48 @@ h2 {
   margin-bottom: 8px;
 }
 
+.compact-sort-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 8px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
+
+.sort-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
+  min-height: 28px;
+  border: 1px solid #d3d0c6;
+  border-radius: 6px;
+  background: #fbfaf5;
+  color: #1b1c1f;
+  cursor: pointer;
+  font-size: 0.72rem;
+  font-weight: 800;
+  line-height: 1;
+  padding: 0 8px;
+  white-space: nowrap;
+}
+
+.sort-button:hover {
+  border-color: #1b1c1f;
+  background: #f7f6f1;
+}
+
+.sort-button.active {
+  border-color: #1b1c1f;
+  background: #d7f36f;
+  box-shadow: inset 0 -2px 0 rgba(27, 28, 31, 0.18);
+}
+
+.sort-button svg {
+  flex: 0 0 auto;
+}
+
 .compact-title {
   display: flex;
   align-items: center;

@@ -354,6 +354,47 @@ describe("App", () => {
     expect(within(appleCard).getByText("3.2万亿")).toBeInTheDocument();
   });
 
+  it("sorts compact quote cards by change percent and toggles direction", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    const list = await screen.findByLabelText("紧凑自选行情");
+
+    await user.click(screen.getByRole("button", { name: "按涨跌幅排序" }));
+    expect(within(list).getAllByRole("article").map((card) => card.getAttribute("aria-label"))).toEqual([
+      "BTC-USD 行情卡",
+      "AAPL 行情卡",
+      "600519 行情卡",
+      "ETH-USD 行情卡"
+    ]);
+
+    await user.click(screen.getByRole("button", { name: "按涨跌幅排序" }));
+    expect(within(list).getAllByRole("article").map((card) => card.getAttribute("aria-label"))).toEqual([
+      "ETH-USD 行情卡",
+      "600519 行情卡",
+      "AAPL 行情卡",
+      "BTC-USD 行情卡"
+    ]);
+  });
+
+  it("keeps missing metric values at the end when sorting quote cards", async () => {
+    const user = userEvent.setup();
+    vi.mocked(fetchQuotes).mockResolvedValue(
+      quotes.map((quote) => (quote.id === "us:AAPL" ? { ...quote, market_cap: null } : quote))
+    );
+    render(<App />);
+
+    const list = await screen.findByLabelText("紧凑自选行情");
+
+    await user.click(screen.getByRole("button", { name: "按总市值排序" }));
+    expect(within(list).getAllByRole("article").map((card) => card.getAttribute("aria-label"))).toEqual([
+      "600519 行情卡",
+      "BTC-USD 行情卡",
+      "ETH-USD 行情卡",
+      "AAPL 行情卡"
+    ]);
+  });
+
   it("loads sector constituents when a sector row is selected", async () => {
     const user = userEvent.setup();
     render(<App />);

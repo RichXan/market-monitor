@@ -1,4 +1,4 @@
-import { Activity, AlertTriangle, Clock3, MoreHorizontal, Plus, Radio, RefreshCw, Trash2, TrendingUp } from "lucide-react";
+import { Activity, AlertTriangle, ArrowDown, ArrowUp, ArrowUpDown, Clock3, MoreHorizontal, Plus, Radio, RefreshCw, Trash2, TrendingUp } from "lucide-react";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import {
   addWatchItem,
@@ -34,6 +34,33 @@ import "./styles.css";
 const indexMarkets: Market[] = ["a", "hk", "us"];
 const sectorMarkets: Market[] = ["a", "hk", "us"];
 const cryptoSummarySymbols = ["BTC-USD", "ETH-USD"];
+
+type WatchlistSortKey = "manual" | "identity" | "change_percent" | "price" | "amount" | "volume_ratio" | "pe_ratio" | "market_cap";
+type WatchlistSortDirection = "asc" | "desc";
+
+type WatchlistSort = {
+  key: WatchlistSortKey;
+  direction: WatchlistSortDirection;
+};
+
+type WatchlistSortOption = {
+  key: WatchlistSortKey;
+  label: string;
+  defaultDirection: WatchlistSortDirection;
+};
+
+const defaultWatchlistSort: WatchlistSort = { key: "manual", direction: "desc" };
+
+const watchlistSortOptions: WatchlistSortOption[] = [
+  { key: "manual", label: "默认", defaultDirection: "desc" },
+  { key: "identity", label: "名称", defaultDirection: "asc" },
+  { key: "change_percent", label: "涨跌幅", defaultDirection: "desc" },
+  { key: "price", label: "价格", defaultDirection: "desc" },
+  { key: "amount", label: "成交额", defaultDirection: "desc" },
+  { key: "volume_ratio", label: "量比", defaultDirection: "desc" },
+  { key: "pe_ratio", label: "市盈率", defaultDirection: "asc" },
+  { key: "market_cap", label: "总市值", defaultDirection: "desc" }
+];
 
 const marketLabels: Record<Market, string> = {
   a: "A股",
@@ -178,6 +205,53 @@ function quoteStatusText(quote?: Quote): string {
   return "横盘整理";
 }
 
+function nextWatchlistSort(current: WatchlistSort, key: WatchlistSortKey): WatchlistSort {
+  const option = watchlistSortOptions.find((item) => item.key === key) ?? watchlistSortOptions[0];
+  if (key === "manual") return { key, direction: option.defaultDirection };
+  if (current.key !== key) return { key, direction: option.defaultDirection };
+  return { key, direction: current.direction === "desc" ? "asc" : "desc" };
+}
+
+function sortableQuoteValue(item: WatchItem, quote: Quote | undefined, key: WatchlistSortKey): string | number | null {
+  if (key === "identity") return quote?.name ?? item.name ?? item.symbol;
+  if (key === "change_percent") return quote?.change_percent ?? null;
+  if (key === "price") return quote?.price ?? null;
+  if (key === "amount") return quote?.amount ?? null;
+  if (key === "volume_ratio") return quote?.volume_ratio ?? null;
+  if (key === "pe_ratio") return quote?.pe_ratio ?? null;
+  if (key === "market_cap") return quote?.market_cap ?? null;
+  return null;
+}
+
+function isMissingSortValue(value: string | number | null): boolean {
+  return value === null || value === "" || (typeof value === "number" && Number.isNaN(value));
+}
+
+function sortWatchlistItems(items: WatchItem[], quotesById: Map<string, Quote>, sort: WatchlistSort): WatchItem[] {
+  if (sort.key === "manual") return items;
+  return items
+    .map((item, index) => ({ item, index }))
+    .sort((left, right) => {
+      const leftValue = sortableQuoteValue(left.item, quotesById.get(left.item.id), sort.key);
+      const rightValue = sortableQuoteValue(right.item, quotesById.get(right.item.id), sort.key);
+      const leftMissing = isMissingSortValue(leftValue);
+      const rightMissing = isMissingSortValue(rightValue);
+      if (leftMissing && rightMissing) return left.index - right.index;
+      if (leftMissing) return 1;
+      if (rightMissing) return -1;
+
+      const direction = sort.direction === "asc" ? 1 : -1;
+      if (typeof leftValue === "string" && typeof rightValue === "string") {
+        const compared = leftValue.localeCompare(rightValue, "zh-CN", { numeric: true, sensitivity: "base" });
+        return compared === 0 ? left.index - right.index : compared * direction;
+      }
+
+      const compared = Number(leftValue) - Number(rightValue);
+      return compared === 0 ? left.index - right.index : compared * direction;
+    })
+    .map(({ item }) => item);
+}
+
 function quoteSparkValues(quote?: Quote): number[] {
   const fallback = quote?.price ?? quote?.previous_close ?? quote?.open;
   if (fallback === null || fallback === undefined || Number.isNaN(fallback)) return [];
@@ -225,11 +299,16 @@ export default function App() {
   const [symbolSearchError, setSymbolSearchError] = useState<string | null>(null);
   const [selectedLookupKey, setSelectedLookupKey] = useState("");
   const [healthMenuOpen, setHealthMenuOpen] = useState(false);
+  const [watchlistSort, setWatchlistSort] = useState<WatchlistSort>(defaultWatchlistSort);
   const loading = pendingLoads > 0;
 
   const quotesById = useMemo(() => {
     return new Map(quotes.map((quote) => [quote.id, quote]));
   }, [quotes]);
+
+  const sortedWatchlist = useMemo(() => {
+    return sortWatchlistItems(watchlist, quotesById, watchlistSort);
+  }, [watchlist, quotesById, watchlistSort]);
 
   const indexByMarket = useMemo(() => {
     return new Map(indexes.map((index) => [index.market, index]));
@@ -559,7 +638,13 @@ export default function App() {
       </section>
 
       <section className="dashboard-grid">
-        <WatchlistPanel watchlist={watchlist} quotesById={quotesById} onDelete={handleDelete} />
+        <WatchlistPanel
+          watchlist={sortedWatchlist}
+          quotesById={quotesById}
+          sort={watchlistSort}
+          onSortChange={(key) => setWatchlistSort((current) => nextWatchlistSort(current, key))}
+          onDelete={handleDelete}
+        />
         <SectorsPanel
           sectors={sectors}
           sectorDetail={sectorDetail}
@@ -694,10 +779,14 @@ function HealthServiceRow({ service }: { service: HealthService }) {
 function WatchlistPanel({
   watchlist,
   quotesById,
+  sort,
+  onSortChange,
   onDelete
 }: {
   watchlist: WatchItem[];
   quotesById: Map<string, Quote>;
+  sort: WatchlistSort;
+  onSortChange: (key: WatchlistSortKey) => void;
   onDelete: (id: string) => Promise<void>;
 }) {
   return (
@@ -713,6 +802,25 @@ function WatchlistPanel({
         <button className="icon-button ghost compact-more-button" type="button" aria-label="自选行情更多" title="自选行情更多">
           <MoreHorizontal aria-hidden="true" size={17} />
         </button>
+      </div>
+      <div className="compact-sort-bar" aria-label="自选行情排序">
+        {watchlistSortOptions.map((option) => {
+          const active = sort.key === option.key;
+          const SortIcon = !active ? ArrowUpDown : sort.direction === "asc" ? ArrowUp : ArrowDown;
+          return (
+            <button
+              aria-label={option.key === "manual" ? "恢复默认排序" : `按${option.label}排序`}
+              aria-pressed={active}
+              className={`sort-button ${active ? "active" : ""}`}
+              key={option.key}
+              onClick={() => onSortChange(option.key)}
+              type="button"
+            >
+              <SortIcon aria-hidden="true" size={13} />
+              <span>{option.label}</span>
+            </button>
+          );
+        })}
       </div>
       <div className="compact-quote-list" aria-label="紧凑自选行情">
         {watchlist.length === 0 ? (
