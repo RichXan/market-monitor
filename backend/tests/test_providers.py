@@ -96,7 +96,7 @@ class FakeSearch:
 
 
 class FakeYFinance:
-    def Ticker(self, symbol: str) -> FakeTicker:
+    def Ticker(self, symbol: str, session=None) -> FakeTicker:
         return FakeTicker(symbol)
 
     def Search(self, query: str, **kwargs) -> FakeSearch:
@@ -152,8 +152,23 @@ class SlowConcurrentYFinance(FakeYFinance):
 
 
 class FailingYFinance:
-    def Ticker(self, symbol: str):
+    def Ticker(self, symbol: str, session=None):
         raise ConnectionError("Yahoo failed")
+
+
+class ProxyAwareYFinance(FakeYFinance):
+    def __init__(self) -> None:
+        self.sessions = []
+
+    def Ticker(self, symbol: str, session=None) -> FakeTicker:
+        self.sessions.append(session)
+        return FakeTicker(symbol)
+
+
+class SlowYFinance(FakeYFinance):
+    def Ticker(self, symbol: str, session=None) -> FakeTicker:
+        time.sleep(0.2)
+        return FakeTicker(symbol)
 
 
 class FakeHttpResponse:
@@ -369,6 +384,16 @@ class SlowAKShare(FakeAKShare):
     def stock_zh_a_spot(self):
         time.sleep(0.2)
         return super().stock_zh_a_spot_em()
+
+
+class SlowIndexAKShare(FakeAKShare):
+    def stock_zh_index_spot_em(self):
+        time.sleep(0.2)
+        return super().stock_zh_index_spot_em()
+
+    def stock_hk_index_spot_em(self):
+        time.sleep(0.2)
+        return super().stock_hk_index_spot_em()
 
 
 class FailingAKShare(FakeAKShare):
@@ -627,6 +652,34 @@ def test_provider_loads_yfinance_watch_quotes_concurrently():
     assert yf.max_active > 1
 
 
+def test_provider_passes_configured_proxy_session_to_yfinance(monkeypatch):
+    monkeypatch.setenv("MARKET_MONITOR_YAHOO_PROXY_URL", "http://172.19.0.1:10829")
+    yf = ProxyAwareYFinance()
+    provider = MarketDataProvider(ak_module=FakeAKShare(), yf_module=yf)
+
+    quotes = provider.get_quotes([WatchItem(id="us:AAPL", market=Market.US, symbol="AAPL", name="Apple")])
+
+    assert quotes[0].status.status == "ok"
+    assert yf.sessions
+    assert yf.sessions[0] is not None
+
+
+def test_provider_times_out_slow_yfinance_quotes():
+    provider = MarketDataProvider(
+        ak_module=FakeAKShare(),
+        yf_module=SlowYFinance(),
+        call_timeout_seconds=0.01,
+    )
+
+    start = time.perf_counter()
+    quotes = provider.get_quotes([WatchItem(id="us:AAPL", market=Market.US, symbol="AAPL", name="Apple")])
+    elapsed = time.perf_counter() - start
+
+    assert elapsed < 0.15
+    assert quotes[0].status.status == "error"
+    assert "timed out" in (quotes[0].status.message or "").lower()
+
+
 def test_provider_falls_back_to_eastmoney_single_quote_when_market_frames_fail(monkeypatch):
     def fake_get(url, **kwargs):
         assert "push2.eastmoney.com/api/qt/stock/get" in url
@@ -742,6 +795,22 @@ def test_provider_times_out_slow_akshare_calls():
 
     assert quotes[0].status.status == "error"
     assert "timed out" in (quotes[0].status.message or "").lower()
+
+
+def test_provider_times_out_slow_akshare_index_calls():
+    provider = FailingGoogleFallbackProvider(
+        ak_module=SlowIndexAKShare(),
+        yf_module=FailingYFinance(),
+        call_timeout_seconds=0.01,
+    )
+
+    start = time.perf_counter()
+    indexes = provider.get_index_quotes()
+    elapsed = time.perf_counter() - start
+
+    assert elapsed < 0.15
+    assert indexes[0].status.status == "error"
+    assert indexes[1].status.status == "error"
 
 
 def test_provider_loads_a_and_hk_quote_frames_concurrently():

@@ -2,6 +2,7 @@ from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout
 from dataclasses import dataclass
 from functools import cached_property
 import html
+import os
 import re
 from time import monotonic
 from typing import Any, Callable, Iterable
@@ -174,6 +175,32 @@ class MarketDataProvider:
         import yfinance as yf
 
         return yf
+
+    @cached_property
+    def yahoo_proxy_url(self) -> str | None:
+        return os.environ.get("MARKET_MONITOR_YAHOO_PROXY_URL")
+
+    @cached_property
+    def yahoo_session(self) -> Any | None:
+        proxy_url = self.yahoo_proxy_url
+        if not proxy_url:
+            return None
+        try:
+            from curl_cffi import requests as curl_requests
+
+            session = curl_requests.Session(impersonate="chrome")
+        except Exception:
+            import requests
+
+            session = requests.Session()
+        session.proxies = {"http": proxy_url, "https": proxy_url}
+        return session
+
+    def _yfinance_ticker(self, symbol: str):
+        session = self.yahoo_session
+        if session is None:
+            return self.yf.Ticker(symbol)
+        return self.yf.Ticker(symbol, session=session)
 
     def get_quotes(self, items: list[WatchItem]) -> list[Quote]:
         quotes_by_id: dict[str, Quote] = {}
@@ -515,7 +542,7 @@ class MarketDataProvider:
         symbol = str(quote.get("symbol") or "")
         if not symbol:
             return self._infer_hk_sector_from_quote(quote)
-        info = self.yf.Ticker(symbol).info
+        info = self._yfinance_ticker(symbol).info
         sector = info.get("sector") or info.get("industry")
         if sector:
             return str(sector)
@@ -587,7 +614,7 @@ class MarketDataProvider:
         items: list[SectorItem] = []
         errors: list[str] = []
         def load_sector_etf(name: str, symbol: str) -> SectorItem:
-            ticker = self.yf.Ticker(symbol)
+            ticker = self._yfinance_ticker(symbol)
             info = ticker.fast_info
             price = _float(info.get("lastPrice"))
             previous_close = _float(info.get("previousClose"))
@@ -1024,7 +1051,20 @@ class MarketDataProvider:
         source: str = "yfinance / Yahoo Finance",
     ) -> Quote:
         try:
-            ticker = self.yf.Ticker(ticker_symbol or item.symbol)
+            return self._call_with_timeout(
+                lambda: self._quote_from_yfinance_inner(item, ticker_symbol, source),
+                source,
+            )
+        except Exception as exc:
+            return self._unavailable_quote(item, "USD", source, str(exc), "error")
+
+    def _quote_from_yfinance_inner(
+        self,
+        item: WatchItem,
+        ticker_symbol: str | None,
+        source: str,
+    ) -> Quote:
+            ticker = self._yfinance_ticker(ticker_symbol or item.symbol)
             info = ticker.fast_info
             price = _float(info.get("lastPrice"))
             previous_close = _float(info.get("previousClose"))
@@ -1083,8 +1123,6 @@ class MarketDataProvider:
                 currency=str(info.get("currency") or "USD"),
                 status=_status("ok", source),
             )
-        except Exception as exc:
-            return self._unavailable_quote(item, "USD", source, str(exc), "error")
 
     def _index_quote_from_akshare(
         self,
@@ -1100,7 +1138,7 @@ class MarketDataProvider:
         )
         try:
             loader = self.ak.stock_hk_index_spot_em if market == Market.HK else self.ak.stock_zh_index_spot_em
-            frame = self._call_provider(loader, source, timeout_seconds=max(self.call_timeout_seconds, 8))
+            frame = self._call_provider(loader, source)
             code_column = self._code_column(frame)
             if frame.empty or code_column is None:
                 return IndexQuote(
@@ -1157,29 +1195,9 @@ class MarketDataProvider:
     ) -> IndexQuote:
         source = "yfinance / Yahoo Finance index"
         try:
-            ticker = self.yf.Ticker(symbol)
-            info = ticker.fast_info
-            price = _float(info.get("lastPrice"))
-            previous_close = _float(info.get("previousClose"))
-            change = None
-            change_percent = None
-            if price is not None and previous_close not in (None, 0):
-                change = round(price - previous_close, 2)
-                change_percent = round((change / previous_close) * 100, 2)
-            return IndexQuote(
-                market=market,
-                symbol=symbol,
-                name=name,
-                price=price,
-                change=change,
-                change_percent=change_percent,
-                open=_float(info.get("open")),
-                high=_float(info.get("dayHigh")),
-                low=_float(info.get("dayLow")),
-                previous_close=previous_close,
-                volume=_float(info.get("lastVolume") or info.get("volume")),
-                currency=str(info.get("currency") or currency),
-                status=_status("ok", source),
+            return self._call_with_timeout(
+                lambda: self._index_quote_from_yfinance_inner(market, symbol, name, currency, source),
+                source,
             )
         except Exception as exc:
             return IndexQuote(
@@ -1189,6 +1207,39 @@ class MarketDataProvider:
                 currency=currency,
                 status=_status("error", source, str(exc)),
             )
+
+    def _index_quote_from_yfinance_inner(
+        self,
+        market: Market,
+        symbol: str,
+        name: str,
+        currency: str,
+        source: str,
+    ) -> IndexQuote:
+        ticker = self._yfinance_ticker(symbol)
+        info = ticker.fast_info
+        price = _float(info.get("lastPrice"))
+        previous_close = _float(info.get("previousClose"))
+        change = None
+        change_percent = None
+        if price is not None and previous_close not in (None, 0):
+            change = round(price - previous_close, 2)
+            change_percent = round((change / previous_close) * 100, 2)
+        return IndexQuote(
+            market=market,
+            symbol=symbol,
+            name=name,
+            price=price,
+            change=change,
+            change_percent=change_percent,
+            open=_float(info.get("open")),
+            high=_float(info.get("dayHigh")),
+            low=_float(info.get("dayLow")),
+            previous_close=previous_close,
+            volume=_float(info.get("lastVolume") or info.get("volume")),
+            currency=str(info.get("currency") or currency),
+            status=_status("ok", source),
+        )
 
     def _index_quote_from_google_finance(
         self,
@@ -1236,7 +1287,7 @@ class MarketDataProvider:
                     "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36"
                 )
             },
-            timeout=max(self.call_timeout_seconds, 8),
+            timeout=self.call_timeout_seconds,
             follow_redirects=True,
         )
         response.raise_for_status()
