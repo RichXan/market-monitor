@@ -100,6 +100,8 @@ EASTMONEY_SINGLE_QUOTE_FIELDS = ",".join(
     ]
 )
 
+STOCK_PROXY_SOURCE = "apiproxy.myvobot.com stock"
+
 
 def _status(
     status: str,
@@ -196,6 +198,10 @@ class MarketDataProvider:
         session.proxies = {"http": proxy_url, "https": proxy_url}
         return session
 
+    @cached_property
+    def stock_proxy_url(self) -> str | None:
+        return os.environ.get("MARKET_MONITOR_STOCK_PROXY_URL") or None
+
     def _yfinance_ticker(self, symbol: str):
         session = self.yahoo_session
         if session is None:
@@ -207,15 +213,15 @@ class MarketDataProvider:
         frames: dict[Market, MarketFrameResult] = {}
         needed_markets = {item.market for item in items if item.market in {Market.A, Market.HK}}
         yfinance_items = [item for item in items if item.market in {Market.US, Market.CRYPTO}]
+        stock_proxy_quotes = self._load_stock_proxy_quotes_for_items(yfinance_items)
         max_workers = max(1, len(needed_markets) + len(items))
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             frame_futures = {executor.submit(self._load_market_frame, market): market for market in needed_markets}
             quote_futures = {
                 executor.submit(
-                    self._quote_from_yfinance,
+                    self._quote_from_stock_proxy_or_yfinance,
                     item,
-                    None,
-                    "yfinance / Yahoo Finance crypto" if item.market == Market.CRYPTO else "yfinance / Yahoo Finance",
+                    stock_proxy_quotes.get(item.id),
                 ): item
                 for item in yfinance_items
             }
@@ -236,7 +242,21 @@ class MarketDataProvider:
 
     def get_index_quotes(self) -> list[IndexQuote]:
         quotes: list[IndexQuote] = []
+        stock_proxy_index_payloads = self._load_stock_proxy_quote_map(
+            [symbol for _, symbol, _, _ in INDEX_QUOTES]
+        )
         for market, symbol, name, currency in INDEX_QUOTES:
+            stock_proxy_quote = self._index_quote_from_stock_proxy_payload(
+                market,
+                symbol,
+                name,
+                currency,
+                stock_proxy_index_payloads.get(symbol.upper()),
+            )
+            if stock_proxy_quote is not None:
+                quotes.append(stock_proxy_quote)
+                continue
+
             if market in {Market.A, Market.HK}:
                 quote = self._index_quote_from_akshare(market, symbol, name, currency)
                 if quote.status.status == "ok":
@@ -251,10 +271,12 @@ class MarketDataProvider:
             quote_path = GOOGLE_INDEX_PATHS.get(market)
             if quote_path is not None:
                 google_quote = self._index_quote_from_google_finance(market, symbol, name, currency, quote_path)
-                quotes.append(google_quote if google_quote.status.status == "ok" else yahoo_quote)
-                continue
+                if google_quote.status.status == "ok":
+                    quotes.append(google_quote)
+                    continue
 
-            quotes.append(yahoo_quote)
+            stock_proxy_quote = self._index_quote_from_stock_proxy(market, symbol, name, currency)
+            quotes.append(stock_proxy_quote if stock_proxy_quote is not None else yahoo_quote)
         return quotes
 
     def search_symbols(self, market: Market, query: str, limit: int = 8) -> list[SymbolSearchResult]:
@@ -795,6 +817,10 @@ class MarketDataProvider:
             eastmoney = self._quote_from_eastmoney_single_quote(item, currency)
             if eastmoney is not None and eastmoney.status.status == "ok":
                 return eastmoney
+            stock_proxy = self._quote_from_stock_proxy_fallback(item)
+            if stock_proxy is not None:
+                self._append_quote_status_message(stock_proxy, str(result.error))
+                return stock_proxy
             fallback = self._quote_from_yahoo_fallback(item)
             if fallback is not None:
                 self._append_quote_status_message(fallback, str(result.error))
@@ -807,6 +833,10 @@ class MarketDataProvider:
             eastmoney = self._quote_from_eastmoney_single_quote(item, currency)
             if eastmoney is not None and eastmoney.status.status == "ok":
                 return eastmoney
+            stock_proxy = self._quote_from_stock_proxy_fallback(item)
+            if stock_proxy is not None:
+                self._append_quote_status_message(stock_proxy, "No quote rows returned.")
+                return stock_proxy
             fallback = self._quote_from_yahoo_fallback(item)
             if fallback is not None:
                 self._append_quote_status_message(fallback, "No quote rows returned.")
@@ -822,6 +852,10 @@ class MarketDataProvider:
             eastmoney = self._quote_from_eastmoney_single_quote(item, currency)
             if eastmoney is not None and eastmoney.status.status == "ok":
                 return eastmoney
+            stock_proxy = self._quote_from_stock_proxy_fallback(item)
+            if stock_proxy is not None:
+                self._append_quote_status_message(stock_proxy, f"No quote row found for {wanted}.")
+                return stock_proxy
             fallback = self._quote_from_yahoo_fallback(item)
             if fallback is not None:
                 self._append_quote_status_message(fallback, f"No quote row found for {wanted}.")
@@ -1043,6 +1077,158 @@ class MarketDataProvider:
             if len(results) >= limit:
                 break
         return results[:limit]
+
+    def _quote_from_stock_proxy_or_yfinance(
+        self,
+        item: WatchItem,
+        stock_proxy_payload: dict[str, Any] | None,
+    ) -> Quote:
+        quote = self._quote_from_stock_proxy_payload(item, stock_proxy_payload)
+        if quote is not None:
+            return quote
+        return self._quote_from_yfinance(
+            item,
+            None,
+            "yfinance / Yahoo Finance crypto" if item.market == Market.CRYPTO else "yfinance / Yahoo Finance",
+        )
+
+    def _load_stock_proxy_quotes_for_items(self, items: list[WatchItem]) -> dict[str, dict[str, Any]]:
+        symbols_by_id = {
+            item.id: symbol
+            for item in items
+            if (symbol := self._stock_proxy_symbol_for_item(item)) is not None
+        }
+        if not symbols_by_id:
+            return {}
+
+        payloads_by_symbol = self._load_stock_proxy_quote_map(symbols_by_id.values())
+        quotes_by_id: dict[str, dict[str, Any]] = {}
+        for item_id, symbol in symbols_by_id.items():
+            payload = payloads_by_symbol.get(symbol.upper())
+            if payload is not None:
+                quotes_by_id[item_id] = payload
+        return quotes_by_id
+
+    def _load_stock_proxy_quote_map(self, symbols: Iterable[str]) -> dict[str, dict[str, Any]]:
+        url = self.stock_proxy_url
+        requested_symbols = [symbol for symbol in dict.fromkeys(symbols) if symbol]
+        if url is None or not requested_symbols:
+            return {}
+
+        params = (
+            {"SYMBOL": requested_symbols[0]}
+            if len(requested_symbols) == 1
+            else {"symbols": ",".join(requested_symbols)}
+        )
+        try:
+            response = httpx.get(
+                url,
+                params=params,
+                headers={
+                    "User-Agent": (
+                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36"
+                    )
+                },
+                timeout=max(self.call_timeout_seconds, 4),
+                follow_redirects=True,
+            )
+            response.raise_for_status()
+            payload = response.json()
+        except Exception:
+            return {}
+
+        raw_quotes = payload.get("stocks") if isinstance(payload, dict) else None
+        if raw_quotes is None and isinstance(payload, dict):
+            raw_quotes = [payload]
+        if not isinstance(raw_quotes, list):
+            return {}
+
+        quotes: dict[str, dict[str, Any]] = {}
+        for raw_quote in raw_quotes:
+            if not isinstance(raw_quote, dict):
+                continue
+            symbol = str(raw_quote.get("symbol") or "").upper()
+            if symbol:
+                quotes[symbol] = raw_quote
+        return quotes
+
+    def _quote_from_stock_proxy_payload(
+        self,
+        item: WatchItem,
+        payload: dict[str, Any] | None,
+    ) -> Quote | None:
+        if payload is None:
+            symbol = self._stock_proxy_symbol_for_item(item)
+            if symbol is None:
+                return None
+            payload = self._load_stock_proxy_quote_map([symbol]).get(symbol.upper())
+        if payload is None:
+            return None
+
+        price = _float(payload.get("currentPrice"))
+        previous_close = _float(payload.get("previousClose"))
+        if price is None:
+            return None
+        change = None
+        change_percent = None
+        if previous_close not in (None, 0):
+            change = round(price - previous_close, 2)
+            change_percent = round((change / previous_close) * 100, 2)
+        return Quote(
+            id=item.id,
+            market=item.market,
+            symbol=item.symbol,
+            name=str(payload.get("shortName") or item.name or item.symbol),
+            price=price,
+            change=change,
+            change_percent=change_percent,
+            previous_close=previous_close,
+            currency=str(payload.get("currency") or self._currency_for_market(item.market)),
+            status=_status("ok", STOCK_PROXY_SOURCE),
+        )
+
+    def _index_quote_from_stock_proxy(
+        self,
+        market: Market,
+        symbol: str,
+        name: str,
+        currency: str,
+    ) -> IndexQuote | None:
+        payload = self._load_stock_proxy_quote_map([symbol]).get(symbol.upper())
+        return self._index_quote_from_stock_proxy_payload(market, symbol, name, currency, payload)
+
+    def _index_quote_from_stock_proxy_payload(
+        self,
+        market: Market,
+        symbol: str,
+        name: str,
+        currency: str,
+        payload: dict[str, Any] | None,
+    ) -> IndexQuote | None:
+        if payload is None:
+            return None
+
+        price = _float(payload.get("currentPrice"))
+        previous_close = _float(payload.get("previousClose"))
+        if price is None:
+            return None
+        change = None
+        change_percent = None
+        if previous_close not in (None, 0):
+            change = round(price - previous_close, 2)
+            change_percent = round((change / previous_close) * 100, 2)
+        return IndexQuote(
+            market=market,
+            symbol=symbol,
+            name=str(payload.get("shortName") or name),
+            price=price,
+            change=change,
+            change_percent=change_percent,
+            previous_close=previous_close,
+            currency=str(payload.get("currency") or currency),
+            status=_status("ok", STOCK_PROXY_SOURCE),
+        )
 
     def _quote_from_yfinance(
         self,
@@ -1303,6 +1489,9 @@ class MarketDataProvider:
             source="yfinance / Yahoo Finance fallback",
         )
 
+    def _quote_from_stock_proxy_fallback(self, item: WatchItem) -> Quote | None:
+        return self._quote_from_stock_proxy_payload(item, None)
+
     def _quote_from_eastmoney_single_quote(self, item: WatchItem, currency: str) -> Quote | None:
         secid = self._eastmoney_secid(item)
         if secid is None:
@@ -1372,6 +1561,18 @@ class MarketDataProvider:
             if symbol.startswith(("4", "8", "9")):
                 return f"{symbol}.BJ"
         return None
+
+    def _stock_proxy_symbol_for_item(self, item: WatchItem) -> str | None:
+        if item.market in {Market.US, Market.CRYPTO}:
+            return item.symbol.upper()
+        return self._yahoo_symbol_for_market(item)
+
+    def _currency_for_market(self, market: Market) -> str:
+        if market == Market.A:
+            return "CNY"
+        if market == Market.HK:
+            return "HKD"
+        return "USD"
 
     def _unavailable_quote(
         self,

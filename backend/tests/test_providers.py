@@ -410,6 +410,14 @@ class FailingAKShare(FakeAKShare):
         raise ConnectionError("fallback HK failed")
 
 
+class FailingIndexAKShare(FakeAKShare):
+    def stock_zh_index_spot_em(self):
+        raise ConnectionError("A index failed")
+
+    def stock_hk_index_spot_em(self):
+        raise ConnectionError("HK index failed")
+
+
 class FailingBoardAKShare(FakeAKShare):
     def stock_board_industry_name_em(self):
         raise ConnectionError("industry board disconnected")
@@ -678,6 +686,140 @@ def test_provider_times_out_slow_yfinance_quotes():
     assert elapsed < 0.15
     assert quotes[0].status.status == "error"
     assert "timed out" in (quotes[0].status.message or "").lower()
+
+
+def test_provider_uses_stock_proxy_for_us_and_crypto_quotes(monkeypatch):
+    monkeypatch.setenv("MARKET_MONITOR_STOCK_PROXY_URL", "https://apiproxy.myvobot.com/stock")
+    requests = []
+
+    def fake_get(url, **kwargs):
+        requests.append((url, kwargs))
+        assert url == "https://apiproxy.myvobot.com/stock"
+        assert kwargs["params"] == {"symbols": "AAPL,BTC-USD"}
+        return FakeHttpResponse(
+            {
+                "stocks": [
+                    {
+                        "symbol": "AAPL",
+                        "shortName": "Apple Inc.",
+                        "currency": "USD",
+                        "currentPrice": 298.01,
+                        "previousClose": 295.95,
+                    },
+                    {
+                        "symbol": "BTC-USD",
+                        "shortName": "Bitcoin USD",
+                        "currency": "USD",
+                        "currentPrice": 86000.0,
+                        "previousClose": 85000.0,
+                    },
+                ]
+            }
+        )
+
+    monkeypatch.setattr("app.providers.httpx.get", fake_get)
+    provider = MarketDataProvider(ak_module=FakeAKShare(), yf_module=FailingYFinance())
+    items = [
+        WatchItem(id="us:AAPL", market=Market.US, symbol="AAPL", name="Apple"),
+        WatchItem(id="crypto:BTC-USD", market=Market.CRYPTO, symbol="BTC-USD", name="Bitcoin"),
+    ]
+
+    quotes = provider.get_quotes(items)
+
+    assert len(requests) == 1
+    assert quotes[0].name == "Apple Inc."
+    assert quotes[0].price == 298.01
+    assert quotes[0].change == 2.06
+    assert quotes[0].change_percent == 0.7
+    assert quotes[0].status.status == "ok"
+    assert quotes[0].status.source == "apiproxy.myvobot.com stock"
+    assert quotes[1].price == 86000.0
+    assert quotes[1].change_percent == 1.18
+    assert quotes[1].status.source == "apiproxy.myvobot.com stock"
+
+
+def test_provider_falls_back_to_stock_proxy_for_a_and_hk_quotes(monkeypatch):
+    monkeypatch.setenv("MARKET_MONITOR_STOCK_PROXY_URL", "https://apiproxy.myvobot.com/stock")
+
+    def fake_get(url, **kwargs):
+        if "push2.eastmoney.com/api/qt/stock/get" in url:
+            raise ConnectionError("eastmoney failed")
+        assert url == "https://apiproxy.myvobot.com/stock"
+        assert kwargs["params"] == {"SYMBOL": "0700.HK"}
+        return FakeHttpResponse(
+            {
+                "symbol": "0700.HK",
+                "shortName": "TENCENT",
+                "currency": "HKD",
+                "currentPrice": 440.2,
+                "previousClose": 445.4,
+            }
+        )
+
+    monkeypatch.setattr("app.providers.httpx.get", fake_get)
+    provider = MarketDataProvider(ak_module=FailingAKShare(), yf_module=FailingYFinance())
+
+    quote = provider.get_quotes([WatchItem(id="hk:00700", market=Market.HK, symbol="00700", name="腾讯控股")])[0]
+
+    assert quote.name == "TENCENT"
+    assert quote.price == 440.2
+    assert quote.change == -5.2
+    assert quote.change_percent == -1.17
+    assert quote.currency == "HKD"
+    assert quote.status.status == "ok"
+    assert quote.status.source == "apiproxy.myvobot.com stock"
+
+
+def test_provider_falls_back_to_stock_proxy_for_index_quotes(monkeypatch):
+    monkeypatch.setenv("MARKET_MONITOR_STOCK_PROXY_URL", "https://apiproxy.myvobot.com/stock")
+
+    def fake_get(url, **kwargs):
+        assert url == "https://apiproxy.myvobot.com/stock"
+        assert kwargs["params"] == {"symbols": "000001.SS,^HSI,^GSPC"}
+        return FakeHttpResponse(
+            {
+                "stocks": [
+                    {
+                        "symbol": "000001.SS",
+                        "shortName": "SSE Composite Index",
+                        "currency": "CNY",
+                        "currentPrice": 4100.0,
+                        "previousClose": 4090.0,
+                    },
+                    {
+                        "symbol": "^HSI",
+                        "shortName": "HANG SENG INDEX",
+                        "currency": "HKD",
+                        "currentPrice": 24000.0,
+                        "previousClose": 24200.0,
+                    },
+                    {
+                        "symbol": "^GSPC",
+                        "shortName": "S&P 500",
+                        "currency": "USD",
+                        "currentPrice": 6800.0,
+                        "previousClose": 6700.0,
+                    },
+                ]
+            }
+        )
+
+    monkeypatch.setattr("app.providers.httpx.get", fake_get)
+    provider = FailingGoogleFallbackProvider(ak_module=FailingIndexAKShare(), yf_module=FailingYFinance())
+
+    indexes = provider.get_index_quotes()
+
+    assert [item.status.source for item in indexes] == [
+        "apiproxy.myvobot.com stock",
+        "apiproxy.myvobot.com stock",
+        "apiproxy.myvobot.com stock",
+    ]
+    assert indexes[2].market == Market.US
+    assert indexes[2].price == 6800.0
+    assert indexes[2].change == 100.0
+    assert indexes[2].change_percent == 1.49
+    assert indexes[2].status.status == "ok"
+    assert indexes[2].status.source == "apiproxy.myvobot.com stock"
 
 
 def test_provider_falls_back_to_eastmoney_single_quote_when_market_frames_fail(monkeypatch):
