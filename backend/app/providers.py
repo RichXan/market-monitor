@@ -154,12 +154,14 @@ class MarketDataProvider:
         cache_ttl_seconds: int = 30,
         call_timeout_seconds: float = 1.5,
         sector_timeout_seconds: float = 10,
+        yfinance_timeout_seconds: float = 10,
     ) -> None:
         self._ak_module = ak_module
         self._yf_module = yf_module
         self.cache_ttl_seconds = cache_ttl_seconds
         self.call_timeout_seconds = call_timeout_seconds
         self.sector_timeout_seconds = sector_timeout_seconds
+        self.yfinance_timeout_seconds = yfinance_timeout_seconds
         self._cache: dict[str, tuple[float, Any]] = {}
 
     @cached_property
@@ -700,7 +702,8 @@ class MarketDataProvider:
             )
 
         quote = self._quote_from_yfinance(
-            WatchItem(id=f"us:{symbol}", market=Market.US, symbol=symbol, name=f"{sector_name} ETF")
+            WatchItem(id=f"us:{symbol}", market=Market.US, symbol=symbol, name=f"{sector_name} ETF"),
+            timeout_seconds=self.yfinance_timeout_seconds,
         )
         item = SectorConstituent(
             symbol=symbol,
@@ -796,6 +799,11 @@ class MarketDataProvider:
                 )
             errors.append(f"{source}: empty response")
 
+        try:
+            return self._get_a_sector_details_from_sina(sector_name, limit, errors)
+        except Exception as exc:
+            errors.append(f"AKShare / Sina sector constituents: {exc}")
+
         return SectorDetailResponse(
             market=Market.A,
             sector_name=sector_name,
@@ -806,6 +814,66 @@ class MarketDataProvider:
                 f"A-share sector constituents are unavailable: {'; '.join(errors) or 'No rows returned.'}",
             ),
         )
+
+    def _get_a_sector_details_from_sina(
+        self,
+        sector_name: str,
+        limit: int,
+        previous_errors: list[str],
+    ) -> SectorDetailResponse:
+        board_source = "AKShare / Sina sector boards"
+        source = "AKShare / Sina sector constituents"
+        board_frame = self._call_provider(
+            self._load_sina_sector_spot_frame,
+            board_source,
+            timeout_seconds=self.sector_timeout_seconds,
+        )
+        label = self._sina_sector_label_for_name(board_frame, sector_name)
+        if label is None:
+            raise RuntimeError(f"No Sina sector label found for {sector_name}.")
+
+        frame = self._call_provider(
+            lambda: self.ak.stock_sector_detail(sector=label),
+            source,
+            timeout_seconds=self.sector_timeout_seconds,
+        )
+        items = self._frame_to_sector_constituents(frame, source)
+        if not items:
+            raise RuntimeError("empty response")
+        items.sort(key=lambda item: item.change_percent if item.change_percent is not None else -9999, reverse=True)
+        return SectorDetailResponse(
+            market=Market.A,
+            sector_name=sector_name,
+            items=items[:limit],
+            status=_status("ok", source, "; ".join(previous_errors) if previous_errors else None),
+        )
+
+    def _load_sina_sector_spot_frame(self) -> pd.DataFrame:
+        try:
+            return self.ak.stock_sector_spot(indicator="新浪行业")
+        except TypeError:
+            return self.ak.stock_sector_spot()
+
+    def _sina_sector_label_for_name(self, frame: pd.DataFrame, sector_name: str) -> str | None:
+        if frame.empty:
+            return None
+
+        exact_label: str | None = None
+        fuzzy_label: str | None = None
+        target = _compact_text(sector_name)
+        for _, row in frame.iterrows():
+            name = _first_present(row, ["板块", "名称", "行业", "行业名称", "name"])
+            label = _first_present(row, ["label", "板块编码", "code", "symbol"])
+            if name is None or label is None:
+                continue
+
+            compact_name = _compact_text(name)
+            if compact_name == target:
+                exact_label = str(label)
+                break
+            if fuzzy_label is None and (target in compact_name or compact_name in target):
+                fuzzy_label = str(label)
+        return exact_label or fuzzy_label
 
     def _quote_from_frame(
         self,
@@ -1090,6 +1158,7 @@ class MarketDataProvider:
             item,
             None,
             "yfinance / Yahoo Finance crypto" if item.market == Market.CRYPTO else "yfinance / Yahoo Finance",
+            timeout_seconds=self.yfinance_timeout_seconds,
         )
 
     def _load_stock_proxy_quotes_for_items(self, items: list[WatchItem]) -> dict[str, dict[str, Any]]:
@@ -1623,12 +1692,13 @@ class MarketDataProvider:
             name = _first_present(row, ["名称", "name", "股票名称", "中文名称"])
             if symbol is None or name is None:
                 continue
+            raw_symbol = re.sub(r"^(SH|SZ|BJ)", "", str(symbol).strip().upper())
             items.append(
                 SectorConstituent(
-                    symbol=normalize_symbol_for_market(Market.A, str(symbol)),
+                    symbol=normalize_symbol_for_market(Market.A, raw_symbol),
                     name=str(name),
-                    price=_float(_first_present(row, ["最新价", "现价", "price"])),
-                    change_percent=_float(_first_present(row, ["涨跌幅", "changePercent"])),
+                    price=_float(_first_present(row, ["最新价", "现价", "price", "trade"])),
+                    change_percent=_float(_first_present(row, ["涨跌幅", "changePercent", "changepercent"])),
                     volume=_float(_first_present(row, ["成交量", "volume"])),
                     amount=_float(_first_present(row, ["成交额", "amount"])),
                     currency="CNY",

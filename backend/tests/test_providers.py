@@ -453,6 +453,48 @@ class FailingAllBoardAKShare(FailingBoardAKShare):
         raise ConnectionError("sina board disconnected")
 
 
+class SinaDetailFallbackAKShare(FakeAKShare):
+    def stock_board_industry_cons_em(self, symbol: str):
+        raise ConnectionError("industry constituents disconnected")
+
+    def stock_board_concept_cons_em(self, symbol: str):
+        raise TimeoutError("concept constituents timeout")
+
+    def stock_sector_spot(self, indicator=None):
+        assert indicator in (None, "新浪行业")
+        return pd.DataFrame(
+            [
+                {"板块": "有色金属", "label": "new_ysjs"},
+                {"板块": "电器行业", "label": "new_dqhy"},
+            ]
+        )
+
+    def stock_sector_detail(self, sector: str):
+        assert sector == "new_ysjs"
+        return pd.DataFrame(
+            [
+                {
+                    "symbol": "sh600111",
+                    "code": "600111",
+                    "name": "北方稀土",
+                    "trade": 54.15,
+                    "changepercent": 5.35,
+                    "volume": 246385960,
+                    "amount": 13073459531,
+                },
+                {
+                    "symbol": "sz000807",
+                    "code": "000807",
+                    "name": "云铝股份",
+                    "trade": 17.8,
+                    "changepercent": 2.48,
+                    "volume": 129300000,
+                    "amount": 2319000000,
+                },
+            ]
+        )
+
+
 class SlowDualMarketAKShare(FakeAKShare):
     def stock_zh_a_spot_em(self):
         time.sleep(0.2)
@@ -677,6 +719,7 @@ def test_provider_times_out_slow_yfinance_quotes():
         ak_module=FakeAKShare(),
         yf_module=SlowYFinance(),
         call_timeout_seconds=0.01,
+        yfinance_timeout_seconds=0.01,
     )
 
     start = time.perf_counter()
@@ -686,6 +729,25 @@ def test_provider_times_out_slow_yfinance_quotes():
     assert elapsed < 0.15
     assert quotes[0].status.status == "error"
     assert "timed out" in (quotes[0].status.message or "").lower()
+
+
+def test_provider_allows_slower_yfinance_watch_quotes():
+    provider = MarketDataProvider(
+        ak_module=FakeAKShare(),
+        yf_module=SlowYFinance(),
+        call_timeout_seconds=0.01,
+    )
+
+    quotes = provider.get_quotes(
+        [
+            WatchItem(id="us:AAPL", market=Market.US, symbol="AAPL", name="Apple"),
+            WatchItem(id="crypto:BTC-USD", market=Market.CRYPTO, symbol="BTC-USD", name="Bitcoin"),
+        ]
+    )
+
+    assert [quote.status.status for quote in quotes] == ["ok", "ok"]
+    assert quotes[0].price == 192.4
+    assert quotes[1].price == 65000.0
 
 
 def test_provider_uses_stock_proxy_for_us_and_crypto_quotes(monkeypatch):
@@ -934,6 +996,36 @@ def test_provider_returns_sector_details_for_a_hk_and_us():
     assert us_detail.status.status == "ok"
     assert us_detail.items[0].symbol == "XLK"
     assert us_detail.items[0].name == "Technology ETF"
+
+
+def test_provider_allows_slower_yfinance_us_sector_details():
+    provider = MarketDataProvider(
+        ak_module=FakeAKShare(),
+        yf_module=SlowYFinance(),
+        call_timeout_seconds=0.01,
+    )
+
+    us_detail = provider.get_sector_details(Market.US, "Technology")
+
+    assert us_detail.status.status == "ok"
+    assert us_detail.items[0].symbol == "XLK"
+    assert us_detail.items[0].price == 210.0
+
+
+def test_provider_falls_back_to_sina_sector_constituents_for_a_share_details():
+    provider = MarketDataProvider(ak_module=SinaDetailFallbackAKShare(), yf_module=FakeYFinance())
+
+    detail = provider.get_sector_details(Market.A, "有色金属")
+
+    assert detail.status.status == "ok"
+    assert detail.status.source == "AKShare / Sina sector constituents"
+    assert [(item.symbol, item.name) for item in detail.items[:2]] == [
+        ("600111", "北方稀土"),
+        ("000807", "云铝股份"),
+    ]
+    assert detail.items[0].price == 54.15
+    assert detail.items[0].change_percent == 5.35
+    assert detail.items[0].amount == 13073459531
 
 
 def test_provider_caches_expensive_akshare_quote_frames():
