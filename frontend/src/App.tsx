@@ -252,34 +252,6 @@ function sortWatchlistItems(items: WatchItem[], quotesById: Map<string, Quote>, 
     .map(({ item }) => item);
 }
 
-function quoteSparkValues(quote?: Quote): number[] {
-  const fallback = quote?.price ?? quote?.previous_close ?? quote?.open;
-  if (fallback === null || fallback === undefined || Number.isNaN(fallback)) return [];
-  const previous = quote?.previous_close ?? fallback;
-  const open = quote?.open ?? previous;
-  const price = quote?.price ?? open;
-  const low = quote?.low ?? Math.min(previous, open, price);
-  const high = quote?.high ?? Math.max(previous, open, price);
-  if ((quote?.change_percent ?? 0) >= 0) {
-    return [previous, open, low, (open + price) / 2, high, price];
-  }
-  return [previous, open, high, (open + price) / 2, low, price];
-}
-
-function sparklinePath(values: number[], width = 78, height = 34): string {
-  if (values.length === 0) return "";
-  const min = Math.min(...values);
-  const max = Math.max(...values);
-  const spread = max - min || 1;
-  return values
-    .map((value, index) => {
-      const x = (index / Math.max(1, values.length - 1)) * width;
-      const y = height - ((value - min) / spread) * height;
-      return `${index === 0 ? "M" : "L"}${x.toFixed(1)},${y.toFixed(1)}`;
-    })
-    .join(" ");
-}
-
 export default function App() {
   const [watchlist, setWatchlist] = useState<WatchItem[]>([]);
   const [quotes, setQuotes] = useState<Quote[]>([]);
@@ -836,9 +808,7 @@ function WatchlistPanel({
                   <small className={movement}>{quoteStatusText(quote)}</small>
                   <small>{item.symbol}</small>
                 </div>
-                <div className="compact-quote-chart">
-                  <QuoteSparkline quote={quote} symbol={item.symbol} />
-                </div>
+                <QuoteMetrics quote={quote} symbol={item.symbol} />
                 <div className="compact-quote-values">
                   <strong className={movement}>{formatPercent(quote?.change_percent)}</strong>
                   <small>{quote ? formatCurrency(quote.price, quote.currency) : "--"}</small>
@@ -846,7 +816,6 @@ function WatchlistPanel({
                 <button className="icon-button ghost compact-delete-button" onClick={() => onDelete(item.id)} title={`删除 ${item.symbol}`} aria-label={`删除 ${item.symbol}`}>
                   <Trash2 aria-hidden="true" size={16} />
                 </button>
-                <QuoteMetrics quote={quote} symbol={item.symbol} />
               </article>
             );
           })
@@ -872,18 +841,6 @@ function QuoteMetrics({ quote, symbol }: { quote?: Quote; symbol: string }) {
         </span>
       ))}
     </div>
-  );
-}
-
-function QuoteSparkline({ quote, symbol }: { quote?: Quote; symbol: string }) {
-  const values = quoteSparkValues(quote);
-  const path = sparklinePath(values);
-  const movement = movementClass(quote?.change_percent);
-  return (
-    <svg className={`quote-sparkline ${movement}`} aria-label={`${symbol} 日内走势示意`} role="img" viewBox="0 0 78 34" preserveAspectRatio="none">
-      <path className="quote-sparkline-axis" d="M0 17 H78" />
-      {path ? <path className="quote-sparkline-path" d={path} /> : null}
-    </svg>
   );
 }
 

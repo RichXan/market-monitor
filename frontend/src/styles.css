@@ -513,11 +513,11 @@ h2 {
 
 .compact-quote-card {
   display: grid;
-  grid-template-columns: minmax(120px, 172px) minmax(260px, 1fr) minmax(78px, auto) 30px;
+  grid-template-columns: minmax(132px, 190px) minmax(260px, 1fr) minmax(82px, auto) 30px;
   align-items: center;
-  gap: 8px 12px;
-  min-height: 74px;
-  padding: 7px 8px 7px 10px;
+  gap: 7px 10px;
+  min-height: 58px;
+  padding: 8px 8px 8px 10px;
   border: 1px solid transparent;
   border-radius: 6px;
   background: #f0f0ee;
@@ -563,48 +563,6 @@ h2 {
   color: #62615d;
 }
 
-.compact-quote-chart {
-  display: flex;
-  align-items: center;
-  align-self: stretch;
-  min-width: 0;
-}
-
-.quote-sparkline {
-  width: 100%;
-  min-width: 78px;
-  height: 42px;
-  display: block;
-  overflow: visible;
-}
-
-.quote-sparkline-axis {
-  fill: none;
-  stroke: rgba(98, 97, 93, 0.35);
-  stroke-width: 1;
-  stroke-dasharray: 4 6;
-}
-
-.quote-sparkline-path {
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 2;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-}
-
-.quote-sparkline.positive {
-  color: #2a9a45;
-}
-
-.quote-sparkline.negative {
-  color: #c7362f;
-}
-
-.quote-sparkline.flat {
-  color: #62615d;
-}
-
 .compact-quote-values {
   display: grid;
   justify-items: end;
@@ -625,12 +583,10 @@ h2 {
 }
 
 .compact-quote-metrics {
-  grid-column: 1 / 4;
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 6px;
-  padding-top: 6px;
-  border-top: 1px solid rgba(98, 97, 93, 0.22);
+  align-items: center;
+  gap: 6px 10px;
   min-width: 0;
 }
 
@@ -657,7 +613,7 @@ h2 {
 
 .compact-delete-button {
   grid-column: 4;
-  grid-row: 1 / span 2;
+  grid-row: 1;
   justify-self: center;
   opacity: 0.42;
 }
@@ -824,7 +780,7 @@ h2 {
   }
 
   .compact-quote-card {
-    grid-template-columns: minmax(118px, 168px) minmax(180px, 1fr) minmax(70px, auto) 30px;
+    grid-template-columns: minmax(122px, 178px) minmax(220px, 1fr) minmax(76px, auto) 30px;
   }
 }
 
@@ -961,21 +917,23 @@ h2 {
     overflow-wrap: anywhere;
   }
 
-  .compact-quote-chart {
-    grid-column: 1 / -1;
-    min-width: 0;
-    padding-top: 2px;
-    border-top: 1px dashed #d3d0c6;
+  .compact-quote-identity {
+    grid-column: 1;
+    grid-row: 1;
   }
 
-  .quote-sparkline {
-    height: 28px;
+  .compact-quote-values {
+    grid-column: 2;
+    grid-row: 1;
   }
 
   .compact-quote-metrics {
     grid-column: 1 / -1;
+    grid-row: 2;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 7px 10px;
+    padding-top: 4px;
+    border-top: 1px solid rgba(98, 97, 93, 0.18);
   }
 
   .compact-delete-button {

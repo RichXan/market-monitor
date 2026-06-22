@@ -323,15 +323,15 @@ describe("App", () => {
     expect(screen.queryByRole("region", { name: "接口健康" })).not.toBeInTheDocument();
   });
 
-  it("renders compact quote cards with status text and sparklines", async () => {
+  it("renders compact quote cards without trend sparklines", async () => {
     render(<App />);
 
     expect(await screen.findByText("Apple")).toBeInTheDocument();
     expect(screen.queryByRole("table")).not.toBeInTheDocument();
     const appleCard = screen.getByLabelText("AAPL 行情卡");
     expect(appleCard).toBeInTheDocument();
-    expect(appleCard.querySelector(".compact-quote-chart")).toBeInTheDocument();
-    expect(screen.getByLabelText("AAPL 日内走势示意")).toBeInTheDocument();
+    expect(appleCard.querySelector(".compact-quote-chart")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("AAPL 日内走势示意")).not.toBeInTheDocument();
     expect(screen.getAllByText("震荡上涨").length).toBeGreaterThan(0);
     expect(screen.getByText("震荡下跌")).toBeInTheDocument();
     expect(screen.getByText("+1.26%")).toBeInTheDocument();
