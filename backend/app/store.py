@@ -24,6 +24,10 @@ REQUIRED_DEFAULT_WATCHLIST: list[WatchItemCreate] = [
 
 def normalize_symbol_for_market(market: Market, symbol: str) -> str:
     normalized = symbol.strip().upper()
+    if market == Market.A:
+        for suffix in (".SH", ".SS", ".SZ", ".BJ"):
+            if normalized.endswith(suffix) and normalized[: -len(suffix)].isdigit():
+                return normalized[: -len(suffix)]
     if market == Market.HK and normalized.isdigit():
         return normalized.zfill(5)
     return normalized

@@ -1235,11 +1235,13 @@ class MarketDataProvider:
         item: WatchItem,
         ticker_symbol: str | None = None,
         source: str = "yfinance / Yahoo Finance",
+        timeout_seconds: float | None = None,
     ) -> Quote:
         try:
             return self._call_with_timeout(
                 lambda: self._quote_from_yfinance_inner(item, ticker_symbol, source),
                 source,
+                timeout_seconds=timeout_seconds,
             )
         except Exception as exc:
             return self._unavailable_quote(item, "USD", source, str(exc), "error")
@@ -1487,6 +1489,7 @@ class MarketDataProvider:
             item,
             ticker_symbol=ticker_symbol,
             source="yfinance / Yahoo Finance fallback",
+            timeout_seconds=max(self.call_timeout_seconds, 10),
         )
 
     def _quote_from_stock_proxy_fallback(self, item: WatchItem) -> Quote | None:
@@ -1543,7 +1546,7 @@ class MarketDataProvider:
     def _eastmoney_secid(self, item: WatchItem) -> str | None:
         symbol = normalize_symbol_for_market(item.market, item.symbol)
         if item.market == Market.A and symbol.isdigit() and len(symbol) == 6:
-            market_id = "1" if symbol.startswith("6") else "0"
+            market_id = "1" if symbol.startswith(("5", "6", "9")) else "0"
             return f"{market_id}.{symbol}"
         if item.market == Market.HK and symbol.isdigit():
             return f"116.{symbol.zfill(5)}"
@@ -1554,11 +1557,11 @@ class MarketDataProvider:
         if item.market == Market.HK and symbol.isdigit():
             return f"{int(symbol):04d}.HK"
         if item.market == Market.A and symbol.isdigit():
-            if symbol.startswith("6"):
+            if symbol.startswith(("5", "6", "9")):
                 return f"{symbol}.SS"
-            if symbol.startswith(("0", "3")):
+            if symbol.startswith(("0", "1", "2", "3")):
                 return f"{symbol}.SZ"
-            if symbol.startswith(("4", "8", "9")):
+            if symbol.startswith(("4", "8")):
                 return f"{symbol}.BJ"
         return None
 

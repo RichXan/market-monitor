@@ -863,6 +863,44 @@ def test_provider_falls_back_to_eastmoney_single_quote_when_market_frames_fail(m
     assert quote.market_cap == 294419967179.25
 
 
+def test_provider_uses_shanghai_eastmoney_secid_for_exchange_funds(monkeypatch):
+    seen_secids: list[str] = []
+
+    def fake_get(url, **kwargs):
+        assert "push2.eastmoney.com/api/qt/stock/get" in url
+        seen_secids.append(kwargs["params"]["secid"])
+        return FakeHttpResponse(
+            {
+                "data": {
+                    "f43": 1234,
+                    "f44": 1240,
+                    "f45": 1200,
+                    "f46": 1210,
+                    "f47": 100000,
+                    "f48": 123400000,
+                    "f57": "513300",
+                    "f58": "纳指ETF",
+                    "f60": 1200,
+                    "f116": 5000000000,
+                    "f162": 0,
+                    "f168": 96,
+                    "f170": 283,
+                }
+            }
+        )
+
+    monkeypatch.setattr("app.providers.httpx.get", fake_get)
+    provider = MarketDataProvider(ak_module=FailingAKShare(), yf_module=FailingYFinance())
+    item = WatchItem(id="a:513300", market=Market.A, symbol="513300.SH", name="纳指ETF")
+
+    quote = provider.get_quotes([item])[0]
+
+    assert seen_secids == ["1.513300"]
+    assert quote.status.status == "ok"
+    assert quote.symbol == "513300.SH"
+    assert quote.name == "纳指ETF"
+
+
 def test_provider_does_not_return_a_share_data_for_crypto_sector_endpoints():
     provider = MarketDataProvider(ak_module=FakeAKShare(), yf_module=FakeYFinance())
 
@@ -990,3 +1028,25 @@ def test_provider_falls_back_to_yahoo_for_a_and_hk_single_quotes():
     assert quotes[1].currency == "HKD"
     assert quotes[1].status.status == "ok"
     assert "Yahoo Finance fallback" in quotes[1].status.source
+
+
+def test_provider_allows_slower_yahoo_fallback_for_a_share_funds(monkeypatch):
+    def fake_get(url, **kwargs):
+        if "push2.eastmoney.com/api/qt/stock/get" in url:
+            raise ConnectionError("eastmoney failed")
+        raise AssertionError(f"Unexpected URL: {url}")
+
+    monkeypatch.setattr("app.providers.httpx.get", fake_get)
+    provider = MarketDataProvider(
+        ak_module=FailingAKShare(),
+        yf_module=SlowYFinance(),
+        call_timeout_seconds=0.01,
+    )
+    item = WatchItem(id="a:513300", market=Market.A, symbol="513300", name="纳斯达克ETF华夏")
+
+    quote = provider.get_quotes([item])[0]
+
+    assert quote.status.status == "ok"
+    assert quote.price == 192.4
+    assert quote.currency == "CNY"
+    assert "Yahoo Finance fallback" in quote.status.source

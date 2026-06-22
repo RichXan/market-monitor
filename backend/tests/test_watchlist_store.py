@@ -82,6 +82,18 @@ def test_store_prevents_duplicate_market_symbol_pairs(tmp_path):
     assert [item.symbol for item in store.list_items()].count("AAPL") == 1
 
 
+def test_store_normalizes_a_share_exchange_suffixes(tmp_path):
+    store = WatchlistStore(tmp_path / "watchlist.json")
+
+    first = store.add_item(WatchItemCreate(market=Market.A, symbol="513300.SH", name="纳指ETF"))
+    second = store.add_item(WatchItemCreate(market=Market.A, symbol="513300"))
+
+    assert first.id == "a:513300"
+    assert first.symbol == "513300"
+    assert second.id == first.id
+    assert [item.symbol for item in store.list_items()].count("513300") == 1
+
+
 def test_store_deletes_watch_item(tmp_path):
     store = WatchlistStore(tmp_path / "watchlist.json")
     created = store.add_item(WatchItemCreate(market=Market.HK, symbol="00005"))
