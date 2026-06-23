@@ -155,6 +155,9 @@ class FailingYFinance:
     def Ticker(self, symbol: str, session=None):
         raise ConnectionError("Yahoo failed")
 
+    def screen(self, query: str, count: int = 25):
+        raise ConnectionError(f"{query} failed")
+
 
 class ProxyAwareYFinance(FakeYFinance):
     def __init__(self) -> None:
@@ -408,6 +411,42 @@ class FailingAKShare(FakeAKShare):
 
     def stock_hk_spot(self):
         raise ConnectionError("fallback HK failed")
+
+
+class HKSectorFallbackAKShare(FakeAKShare):
+    def stock_hk_spot_em(self):
+        return pd.DataFrame(
+            [
+                {
+                    "代码": "00700",
+                    "名称": "腾讯控股",
+                    "最新价": 440.0,
+                    "涨跌幅": 2.5,
+                    "成交量": 100000000,
+                },
+                {
+                    "代码": "00941",
+                    "名称": "中国移动",
+                    "最新价": 84.5,
+                    "涨跌幅": 1.5,
+                    "成交量": 80000000,
+                },
+                {
+                    "代码": "09988",
+                    "名称": "阿里巴巴-W",
+                    "最新价": 105.0,
+                    "涨跌幅": 3.0,
+                    "成交量": 50000000,
+                },
+                {
+                    "代码": "00005",
+                    "名称": "汇丰控股",
+                    "最新价": 93.0,
+                    "涨跌幅": -1.0,
+                    "成交量": 90000000,
+                },
+            ]
+        )
 
 
 class FailingIndexAKShare(FakeAKShare):
@@ -675,6 +714,75 @@ def test_provider_returns_yahoo_hk_sector_activity_and_us_sector_proxies():
     assert [item.name for item in us.items[:2]] == ["Technology", "Health Care"]
     assert us.items[-1].name == "Financials"
     assert us.items[0].change_percent == 5.0
+
+
+def test_provider_falls_back_to_akshare_hk_quotes_when_yahoo_hk_sectors_are_limited():
+    provider = MarketDataProvider(ak_module=HKSectorFallbackAKShare(), yf_module=FailingYFinance())
+
+    response = provider.get_sectors(Market.HK)
+
+    assert response.status.status == "ok"
+    assert response.status.source == "AKShare / Eastmoney HK sector fallback"
+    assert [item.name for item in response.items[:3]] == ["通信服务", "金融服务", "非必需消费"]
+    assert response.items[0].change_percent == 2.37
+    assert response.items[0].volume == 180000000
+
+
+def test_provider_falls_back_to_stock_proxy_for_hk_sector_proxies(monkeypatch):
+    monkeypatch.setenv("MARKET_MONITOR_STOCK_PROXY_URL", "https://apiproxy.myvobot.com/stock")
+
+    def fake_get(url, **kwargs):
+        assert url == "https://apiproxy.myvobot.com/stock"
+        assert kwargs["params"]["symbols"].startswith("0700.HK,0941.HK,9988.HK")
+        return FakeHttpResponse(
+            {
+                "stocks": [
+                    {"symbol": "0700.HK", "shortName": "TENCENT", "currency": "HKD", "currentPrice": 440.0, "previousClose": 430.0},
+                    {"symbol": "0941.HK", "shortName": "CHINA MOBILE", "currency": "HKD", "currentPrice": 85.0, "previousClose": 84.0},
+                    {"symbol": "9988.HK", "shortName": "BABA-W", "currency": "HKD", "currentPrice": 105.0, "previousClose": 100.0},
+                ]
+            }
+        )
+
+    monkeypatch.setattr("app.providers.httpx.get", fake_get)
+    provider = MarketDataProvider(ak_module=FailingAKShare(), yf_module=FailingYFinance())
+
+    response = provider.get_sectors(Market.HK)
+
+    assert response.status.status == "ok"
+    assert response.status.source == "apiproxy.myvobot.com HK sector proxies"
+    assert [item.name for item in response.items] == ["通信服务", "非必需消费"]
+    assert response.items[1].change_percent == 5.0
+
+
+def test_provider_falls_back_to_stock_proxy_for_us_sector_etfs(monkeypatch):
+    monkeypatch.setenv("MARKET_MONITOR_STOCK_PROXY_URL", "https://apiproxy.myvobot.com/stock")
+
+    def fake_get(url, **kwargs):
+        assert url == "https://apiproxy.myvobot.com/stock"
+        assert kwargs["params"] == {
+            "symbols": "XLK,XLF,XLV,XLE,XLY,XLP,XLI,XLB,XLU,XLRE,XLC"
+        }
+        return FakeHttpResponse(
+            {
+                "stocks": [
+                    {"symbol": "XLK", "shortName": "Technology", "currency": "USD", "currentPrice": 212, "previousClose": 200},
+                    {"symbol": "XLF", "shortName": "Financials", "currency": "USD", "currentPrice": 49, "previousClose": 50},
+                    {"symbol": "XLV", "shortName": "Health Care", "currency": "USD", "currentPrice": 101, "previousClose": 100},
+                ]
+            }
+        )
+
+    monkeypatch.setattr("app.providers.httpx.get", fake_get)
+    provider = MarketDataProvider(ak_module=FakeAKShare(), yf_module=FailingYFinance())
+
+    response = provider.get_sectors(Market.US)
+
+    assert response.status.status == "ok"
+    assert response.status.source == "apiproxy.myvobot.com stock sector ETFs"
+    assert [item.name for item in response.items] == ["Technology", "Health Care", "Financials"]
+    assert response.items[0].change_percent == 6.0
+    assert response.items[2].change_percent == -2.0
 
 
 def test_provider_loads_us_sector_etfs_concurrently():

@@ -62,6 +62,31 @@ HK_SECTOR_LABELS: dict[str, str] = {
     "Utilities": "公用事业",
 }
 
+HK_SECTOR_PROXIES: list[tuple[str, str]] = [
+    ("Communication Services", "0700.HK"),
+    ("Communication Services", "0941.HK"),
+    ("Consumer Cyclical", "9988.HK"),
+    ("Consumer Cyclical", "3690.HK"),
+    ("Consumer Cyclical", "1211.HK"),
+    ("Financial Services", "0005.HK"),
+    ("Financial Services", "1299.HK"),
+    ("Financial Services", "0939.HK"),
+    ("Technology", "1810.HK"),
+    ("Technology", "0981.HK"),
+    ("Energy", "0883.HK"),
+    ("Energy", "0857.HK"),
+    ("Healthcare", "1093.HK"),
+    ("Healthcare", "1177.HK"),
+    ("Real Estate", "1109.HK"),
+    ("Real Estate", "0016.HK"),
+    ("Utilities", "0002.HK"),
+    ("Utilities", "0006.HK"),
+    ("Basic Materials", "2600.HK"),
+    ("Basic Materials", "0358.HK"),
+    ("Industrials", "1800.HK"),
+    ("Industrials", "0669.HK"),
+]
+
 CRYPTO_SYMBOLS: list[tuple[str, str]] = [
     ("BTC-USD", "Bitcoin"),
     ("ETH-USD", "Ethereum"),
@@ -486,6 +511,28 @@ class MarketDataProvider:
                 timeout_seconds=max(self.sector_timeout_seconds, 12),
             )
         except Exception as exc:
+            stock_proxy_items = self._load_hk_sector_activity_items_from_stock_proxy()
+            if stock_proxy_items:
+                return SectorResponse(
+                    market=Market.HK,
+                    items=stock_proxy_items[:16],
+                    status=_status(
+                        "ok",
+                        "apiproxy.myvobot.com HK sector proxies",
+                        f"Yahoo Finance active stocks unavailable; using Hong Kong sector proxy quotes. Yahoo error: {exc}",
+                    ),
+                )
+            akshare_items = self._load_hk_sector_activity_items_from_akshare()
+            if akshare_items:
+                return SectorResponse(
+                    market=Market.HK,
+                    items=akshare_items[:16],
+                    status=_status(
+                        "ok",
+                        "AKShare / Eastmoney HK sector fallback",
+                        f"Yahoo Finance active stocks unavailable; using Hong Kong spot quotes. Yahoo error: {exc}",
+                    ),
+                )
             return SectorResponse(
                 market=Market.HK,
                 items=[],
@@ -493,6 +540,28 @@ class MarketDataProvider:
             )
 
         if not items:
+            stock_proxy_items = self._load_hk_sector_activity_items_from_stock_proxy()
+            if stock_proxy_items:
+                return SectorResponse(
+                    market=Market.HK,
+                    items=stock_proxy_items[:16],
+                    status=_status(
+                        "ok",
+                        "apiproxy.myvobot.com HK sector proxies",
+                        "Yahoo Finance returned no usable rows; using Hong Kong sector proxy quotes.",
+                    ),
+                )
+            akshare_items = self._load_hk_sector_activity_items_from_akshare()
+            if akshare_items:
+                return SectorResponse(
+                    market=Market.HK,
+                    items=akshare_items[:16],
+                    status=_status(
+                        "ok",
+                        "AKShare / Eastmoney HK sector fallback",
+                        "Yahoo Finance returned no usable rows; using Hong Kong spot quotes.",
+                    ),
+                )
             return SectorResponse(
                 market=Market.HK,
                 items=[],
@@ -528,6 +597,109 @@ class MarketDataProvider:
                     sector_by_symbol[symbol] = sector
 
         return self._aggregate_hk_sector_quotes(quotes, sector_by_symbol)
+
+    def _load_hk_sector_activity_items_from_stock_proxy(self) -> list[SectorItem]:
+        payloads = self._load_stock_proxy_quote_map([symbol for _, symbol in HK_SECTOR_PROXIES])
+        if not payloads:
+            return []
+
+        quotes: list[dict[str, Any]] = []
+        for sector, symbol in HK_SECTOR_PROXIES:
+            payload = payloads.get(symbol.upper())
+            if payload is None:
+                continue
+            price = _float(payload.get("currentPrice"))
+            previous_close = _float(payload.get("previousClose"))
+            if price is None or previous_close in (None, 0):
+                continue
+            change = round(price - previous_close, 4)
+            quotes.append(
+                {
+                    "symbol": symbol,
+                    "shortName": str(payload.get("shortName") or symbol),
+                    "longName": str(payload.get("shortName") or symbol),
+                    "sector": sector,
+                    "regularMarketPrice": price,
+                    "regularMarketChangePercent": round((change / previous_close) * 100, 2),
+                    "regularMarketVolume": 0,
+                }
+            )
+        return self._aggregate_hk_sector_quotes(quotes, {})
+
+    def _load_hk_sector_activity_items_from_akshare(self) -> list[SectorItem]:
+        try:
+            hot_rank = self._call_provider(
+                self.ak.stock_hk_hot_rank_em,
+                "AKShare / Eastmoney HK hot rank",
+                timeout_seconds=self.sector_timeout_seconds,
+            )
+            items = self._hk_sector_items_from_frame(
+                hot_rank,
+                code_names=["代码", "symbol", "code"],
+                name_names=["股票名称", "名称", "name", "shortName"],
+                price_names=["最新价", "现价", "price"],
+                change_names=["涨跌幅", "changePercent"],
+                volume_names=["成交量", "volume"],
+                limit=40,
+            )
+            if items:
+                return items
+        except Exception:
+            pass
+
+        result = self._load_market_frame(Market.HK)
+        if result.error is not None or result.frame is None or result.frame.empty:
+            return []
+
+        return self._hk_sector_items_from_frame(
+            result.frame,
+            code_names=["代码", "symbol", "code", "股票代码"],
+            name_names=["名称", "name", "股票名称", "中文名称", "shortName", "longName"],
+            price_names=["最新价", "现价", "price"],
+            change_names=["涨跌幅", "changePercent"],
+            volume_names=["成交量", "volume"],
+            limit=40,
+        )
+
+    def _hk_sector_items_from_frame(
+        self,
+        frame: pd.DataFrame,
+        code_names: list[str],
+        name_names: list[str],
+        price_names: list[str],
+        change_names: list[str],
+        volume_names: list[str],
+        limit: int,
+    ) -> list[SectorItem]:
+        frame = frame.copy()
+        code_column = next((column for column in code_names if column in frame.columns), None)
+        name_column = next((column for column in name_names if column in frame.columns), None)
+        if frame.empty or code_column is None or name_column is None:
+            return []
+
+        quotes: list[dict[str, Any]] = []
+        for _, row in frame.iterrows():
+            raw_symbol = str(row[code_column])
+            symbol = normalize_symbol_for_market(Market.HK, raw_symbol)
+            name = str(row[name_column])
+            price = _float(_first_present(row, price_names))
+            change_percent = _float(_first_present(row, change_names))
+            volume = _float(_first_present(row, volume_names)) or 0.0
+            if not symbol or change_percent is None:
+                continue
+            quotes.append(
+                {
+                    "symbol": f"{int(symbol):04d}.HK" if symbol.isdigit() else symbol,
+                    "shortName": name,
+                    "longName": name,
+                    "regularMarketPrice": price,
+                    "regularMarketChangePercent": change_percent,
+                    "regularMarketVolume": volume,
+                }
+            )
+
+        quotes.sort(key=lambda quote: _float(quote.get("regularMarketVolume")) or 0, reverse=True)
+        return self._aggregate_hk_sector_quotes(quotes[:limit], {})
 
     def _load_hk_active_quotes(self) -> list[dict[str, Any]]:
         errors: list[str] = []
@@ -618,16 +790,16 @@ class MarketDataProvider:
             str(quote.get(key) or "") for key in ["shortName", "longName", "symbol"]
         ).upper()
         keyword_sectors = [
-            ("Financial Services", ["BANK", "HSBC", "INSURANCE", "AIA", "FINANC", "SECURITIES"]),
-            ("Technology", ["TECH", "SEMICONDUCTOR", "SOFTWARE", "ELECTRONIC", "XIAOMI", "SENSETIME"]),
-            ("Communication Services", ["TENCENT", "TELECOM", "MOBILE", "MEDIA", "ENTERTAINMENT"]),
-            ("Real Estate", ["PROPERTY", "REAL ESTATE", "LAND", "GARDEN", "DEVELOPMENT"]),
-            ("Energy", ["ENERGY", "OIL", "PETRO", "GAS", "COAL"]),
-            ("Healthcare", ["PHARMA", "BIO", "HEALTH", "MEDICAL"]),
-            ("Basic Materials", ["MATERIAL", "ALUMINUM", "STEEL", "CEMENT", "BUILDING"]),
-            ("Consumer Cyclical", ["AUTO", "RETAIL", "HOTEL", "TRAVEL", "MEITUAN", "BABA"]),
-            ("Industrials", ["INDUSTRIAL", "ENGINEERING", "CONSTRUCTION", "MACHINERY"]),
-            ("Utilities", ["POWER", "UTILITY", "WATER", "ELECTRIC"]),
+            ("Financial Services", ["BANK", "HSBC", "INSURANCE", "AIA", "FINANC", "SECURITIES", "银行", "保险", "金融", "汇丰", "友邦"]),
+            ("Technology", ["TECH", "SEMICONDUCTOR", "SOFTWARE", "ELECTRONIC", "XIAOMI", "SENSETIME", "科技", "半导体", "电子", "小米", "商汤"]),
+            ("Communication Services", ["TENCENT", "TELECOM", "MOBILE", "MEDIA", "ENTERTAINMENT", "腾讯", "电讯", "电信", "移动", "联通", "媒体", "娱乐"]),
+            ("Real Estate", ["PROPERTY", "REAL ESTATE", "LAND", "GARDEN", "DEVELOPMENT", "地产", "置地", "物业", "花园", "发展"]),
+            ("Energy", ["ENERGY", "OIL", "PETRO", "GAS", "COAL", "能源", "石油", "燃气", "煤"]),
+            ("Healthcare", ["PHARMA", "BIO", "HEALTH", "MEDICAL", "医药", "生物", "医疗", "健康", "药业"]),
+            ("Basic Materials", ["MATERIAL", "ALUMINUM", "STEEL", "CEMENT", "BUILDING", "材料", "铝", "钢", "水泥", "建材"]),
+            ("Consumer Cyclical", ["AUTO", "RETAIL", "HOTEL", "TRAVEL", "MEITUAN", "BABA", "汽车", "零售", "酒店", "旅游", "美团", "阿里", "巴巴"]),
+            ("Industrials", ["INDUSTRIAL", "ENGINEERING", "CONSTRUCTION", "MACHINERY", "工业", "工程", "建筑", "机械"]),
+            ("Utilities", ["POWER", "UTILITY", "WATER", "ELECTRIC", "电力", "公用", "水务", "电能"]),
         ]
         for sector, keywords in keyword_sectors:
             if any(keyword in name for keyword in keywords):
@@ -676,6 +848,18 @@ class MarketDataProvider:
                     "US sector activity is represented by liquid sector ETF proxies.",
                 ),
             )
+
+        stock_proxy_items = self._get_us_sector_etfs_from_stock_proxy()
+        if stock_proxy_items:
+            return SectorResponse(
+                market=Market.US,
+                items=stock_proxy_items,
+                status=_status(
+                    "ok",
+                    "apiproxy.myvobot.com stock sector ETFs",
+                    f"Yahoo Finance sector ETFs unavailable; using stock proxy fallback. Yahoo errors: {'; '.join(errors)}",
+                ),
+            )
         return SectorResponse(
             market=Market.US,
             items=[],
@@ -685,6 +869,32 @@ class MarketDataProvider:
                 "; ".join(errors) or "Yahoo Finance sector ETF proxy data is unavailable.",
             ),
         )
+
+    def _get_us_sector_etfs_from_stock_proxy(self) -> list[SectorItem]:
+        payloads = self._load_stock_proxy_quote_map([symbol for _, symbol in US_SECTOR_ETFS])
+        if not payloads:
+            return []
+
+        items: list[SectorItem] = []
+        for name, symbol in US_SECTOR_ETFS:
+            payload = payloads.get(symbol.upper())
+            if payload is None:
+                continue
+            price = _float(payload.get("currentPrice"))
+            previous_close = _float(payload.get("previousClose"))
+            if price is None or previous_close in (None, 0):
+                continue
+            change = round(price - previous_close, 2)
+            items.append(
+                SectorItem(
+                    name=name,
+                    price=price,
+                    change=change,
+                    change_percent=round((change / previous_close) * 100, 2),
+                )
+            )
+        items.sort(key=lambda item: item.change_percent if item.change_percent is not None else -9999, reverse=True)
+        return items
 
     def _get_us_sector_details(self, sector_name: str, limit: int) -> SectorDetailResponse:
         symbols = {name: symbol for name, symbol in US_SECTOR_ETFS}
